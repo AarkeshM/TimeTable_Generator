@@ -7,6 +7,8 @@ import cors from "cors";
 import authRoutes from "./routes/auth.routes.js";
 import courseRoutes from "./routes/course.routes.js";
 import staffRoutes from "./routes/staff.routes.js";
+import allocationRoutes from "./routes/allocations.routes.js";
+import timetableRoutes from "./routes/timetable.routes.js";
 
 dotenv.config();
 const app = express();
@@ -22,10 +24,11 @@ mongoose
   .catch((err) => console.error("❌ MongoDB Error:", err));
 
 // --- Routes ---
-app.use("/api/auth", authRoutes);
+app.use("/api/", authRoutes); 
 app.use("/api/courses", courseRoutes);
 app.use("/api/staff", staffRoutes);
-
+app.use("/api/allocations", allocationRoutes);
+app.use("/api/timetable", timetableRoutes);
 // --- Test Route ---
 app.get("/", (req, res) => res.send("API Running"));
 

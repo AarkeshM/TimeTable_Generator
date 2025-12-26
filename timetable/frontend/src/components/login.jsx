@@ -31,7 +31,7 @@ export default function AuthPage() {
   const navigate = useNavigate();
 
   const [isLogin, setIsLogin] = useState(true);
-  const [loginAs, setLoginAs] = useState('staff'); // 'staff' or 'admin'
+  const [loginAs, setLoginAs] = useState('staff'); 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -41,7 +41,7 @@ export default function AuthPage() {
     mobile: "",
     email: "",
     department: "",
-    role: "staff", // Default role for registration
+    role: "staff", 
     gender: "",
     password: "",
     confirmPassword: "",
