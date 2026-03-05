@@ -2,7 +2,8 @@ import React, { useEffect, useState } from "react";
 import axios from "axios";
 import { motion, AnimatePresence } from "framer-motion";
 import { 
-  Trash2, Loader2, CheckCircle, AlertTriangle, ArrowLeft, BookOpen, Layers, Calendar
+  Trash2, Loader2, CheckCircle, AlertTriangle, ArrowLeft, 
+  BookOpen, Layers, Calendar, Edit2, X, Save, Tag
 } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 
@@ -10,6 +11,10 @@ export default function StaffCourses() {
   const [courses, setCourses] = useState([]);
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState({ type: null, message: "" });
+  
+  // --- New State for Editing ---
+  const [editingCourse, setEditingCourse] = useState(null); 
+  const [isUpdating, setIsUpdating] = useState(false); 
   const [deletingId, setDeletingId] = useState(null);
   
   const navigate = useNavigate();
@@ -36,12 +41,20 @@ export default function StaffCourses() {
         return;
       }
 
-      const res = await axios.get(
-        "http://localhost:5000/api/courses/", 
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
+      const config = { headers: { Authorization: `Bearer ${token}` } };
 
-      setCourses(res.data.courses || []);
+      // Fetch both Core Courses and Elective Courses simultaneously
+      const [coursesRes, electivesRes] = await Promise.all([
+        axios.get("http://localhost:5000/api/courses/", config).catch(() => ({ data: { courses: [] } })),
+        axios.get("http://localhost:5000/api/elective-courses/", config).catch(() => ({ data: { electives: [] } }))
+      ]);
+
+      // Tag them with a category so we know which API to call later for updates/deletes
+      const coreCourses = (coursesRes.data.courses || []).map(c => ({ ...c, category: 'Core' }));
+      // Adjust 'electivesRes.data.electives' if your backend returns a different key
+      const electiveCourses = (electivesRes.data.electives || []).map(c => ({ ...c, category: 'Elective' }));
+
+      setCourses([...coreCourses, ...electiveCourses]);
       
     } catch (err) {
       console.error("Failed to load courses:", err);
@@ -50,7 +63,7 @@ export default function StaffCourses() {
          localStorage.removeItem("token");
          setTimeout(() => navigate("/login"), 2000);
       } else {
-         handleStatus("error", err.response?.data?.message || "Failed to fetch courses.");
+         handleStatus("error", "Failed to fetch course data.");
       }
     } finally {
       setLoading(false);
@@ -61,42 +74,83 @@ export default function StaffCourses() {
     fetchCourses();
   }, []);
 
-  const deleteCourse = async (courseId, courseName) => {
+  // --- Delete Logic ---
+
+  const deleteCourse = async (course) => {
     const confirmDelete = window.confirm(
-      `Are you sure you want to delete ${courseName}? This cannot be undone.`
+      `Are you sure you want to delete the ${course.category} course "${course.name}"? This cannot be undone.`
     );
     
     if (!confirmDelete) return;
 
-    setDeletingId(courseId);
+    setDeletingId(course._id);
 
     try {
       const token = localStorage.getItem("token");
-      if (!token) {
-        handleStatus("error", "Authentication token not found.");
-        return;
-      }
+      
+      // Determine endpoint based on category
+      const endpoint = course.category === 'Core' ? 'courses' : 'electives';
 
       await axios.delete(
-        `http://localhost:5000/api/courses/${courseId}`,
+        `http://localhost:5000/api/${endpoint}/${course._id}`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
       
-      setCourses(current => current.filter(c => c._id !== courseId));
-      handleStatus("success", `Course deleted successfully!`);
+      setCourses(current => current.filter(c => c._id !== course._id));
+      handleStatus("success", `${course.category} course deleted successfully!`);
 
     } catch (err) {
       console.error("Delete failed:", err);
-      let errorMessage = "Failed to delete course.";
-      if (err.response?.status === 401) {
-          errorMessage = "Session expired.";
-          localStorage.removeItem("token");
-          setTimeout(() => navigate("/login"), 2000);
-      }
-      handleStatus("error", errorMessage);
-      fetchCourses(); 
+      handleStatus("error", "Failed to delete course.");
     } finally {
       setDeletingId(null);
+    }
+  };
+
+  // --- Update Logic ---
+
+  const initiateEdit = (course) => {
+    setEditingCourse({ ...course });
+  };
+
+  const handleEditChange = (e) => {
+    setEditingCourse({ ...editingCourse, [e.target.name]: e.target.value });
+  };
+
+  const saveUpdate = async (e) => {
+    e.preventDefault();
+    setIsUpdating(true);
+
+    try {
+      const token = localStorage.getItem("token");
+      
+      // Determine endpoint based on category
+      const endpoint = editingCourse.category === 'Core' ? 'courses' : 'electives';
+
+      const res = await axios.put(
+        `http://localhost:5000/api/${endpoint}/${editingCourse._id}`,
+        editingCourse,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      // Determine the correct object key from response
+      const updatedData = res.data.course || res.data.elective || editingCourse;
+      
+      // Ensure we keep the category tag
+      const finalUpdatedObject = { ...updatedData, category: editingCourse.category };
+
+      setCourses(prevCourses => 
+        prevCourses.map(c => c._id === editingCourse._id ? finalUpdatedObject : c)
+      );
+
+      handleStatus("success", "Course updated successfully!");
+      setEditingCourse(null); 
+
+    } catch (err) {
+      console.error("Update failed:", err);
+      handleStatus("error", err.response?.data?.message || "Failed to update course.");
+    } finally {
+      setIsUpdating(false);
     }
   };
 
@@ -117,7 +171,7 @@ export default function StaffCourses() {
   );
 
   return (
-    <div className="min-h-screen bg-gray-50 text-slate-800 p-4 lg:p-8">
+    <div className="min-h-screen bg-gray-50 text-slate-800 p-4 lg:p-8 relative">
       <div className="max-w-7xl mx-auto">
         
         {/* HEADER */}
@@ -135,14 +189,19 @@ export default function StaffCourses() {
             </Link>
             <div>
               <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-                Course Load
+                All Courses
               </h1>
-              <p className="text-gray-500 text-sm mt-1">Manage your academic schedule</p>
+              <p className="text-gray-500 text-sm mt-1">Manage core and elective subjects</p>
             </div>
           </div>
           
-          <div className="bg-indigo-50 text-indigo-700 px-4 py-2 rounded-full text-sm font-medium self-start sm:self-center">
-             {courses.length} Active {courses.length === 1 ? 'Course' : 'Courses'}
+          <div className="flex gap-2">
+            <div className="bg-indigo-50 text-indigo-700 px-4 py-2 rounded-full text-sm font-medium">
+                {courses.filter(c => c.category === 'Core').length} Core
+            </div>
+            <div className="bg-purple-50 text-purple-700 px-4 py-2 rounded-full text-sm font-medium">
+                {courses.filter(c => c.category === 'Elective').length} Electives
+            </div>
           </div>
         </motion.header>
         
@@ -155,7 +214,7 @@ export default function StaffCourses() {
         {loading && courses.length === 0 && (
           <div className="flex flex-col items-center justify-center py-20 text-indigo-600">
             <Loader2 className="w-10 h-10 animate-spin mb-4" />
-            <p className="text-gray-500 font-medium">Fetching your courses...</p>
+            <p className="text-gray-500 font-medium">Fetching courses...</p>
           </div>
         )}
 
@@ -166,7 +225,7 @@ export default function StaffCourses() {
               <BookOpen className="w-8 h-8 text-gray-400" />
             </div>
             <h3 className="text-lg font-semibold text-gray-900">No courses found</h3>
-            <p className="text-gray-500 mt-2 max-w-sm mx-auto">You haven't added any courses yet. Add a course to get started.</p>
+            <p className="text-gray-500 mt-2 max-w-sm mx-auto">You haven't added any core or elective courses yet.</p>
           </div>
         )}
 
@@ -184,16 +243,31 @@ export default function StaffCourses() {
                   className="bg-white p-5 rounded-xl shadow-sm border border-gray-200 flex flex-col justify-between"
                 >
                   <div className="flex justify-between items-start mb-3">
-                    <div className="bg-indigo-50 text-indigo-700 font-bold px-2.5 py-1 rounded text-xs tracking-wide uppercase">
+                    <div className={`font-bold px-2.5 py-1 rounded text-xs tracking-wide uppercase flex items-center gap-1 ${
+                        course.category === 'Core' 
+                        ? 'bg-indigo-50 text-indigo-700' 
+                        : 'bg-purple-50 text-purple-700'
+                    }`}>
                       {course.acronym}
+                      <span className="opacity-50">| {course.category}</span>
                     </div>
-                    <button
-                      onClick={() => deleteCourse(course._id, course.name)}
-                      disabled={deletingId === course._id}
-                      className="text-gray-400 hover:text-red-600 p-1.5 -mr-2 -mt-2 rounded-full hover:bg-red-50 transition"
-                    >
-                      {deletingId === course._id ? <Loader2 className="w-5 h-5 animate-spin text-red-500" /> : <Trash2 size={18} />}
-                    </button>
+                    <div className="flex gap-2 -mr-2 -mt-2">
+                        {/* Mobile Edit Button */}
+                        <button 
+                            onClick={() => initiateEdit(course)}
+                            className="text-gray-400 hover:text-blue-600 p-1.5 rounded-full hover:bg-blue-50 transition"
+                        >
+                            <Edit2 size={18} />
+                        </button>
+                        {/* Mobile Delete Button */}
+                        <button
+                        onClick={() => deleteCourse(course)}
+                        disabled={deletingId === course._id}
+                        className="text-gray-400 hover:text-red-600 p-1.5 rounded-full hover:bg-red-50 transition"
+                        >
+                        {deletingId === course._id ? <Loader2 className="w-5 h-5 animate-spin text-red-500" /> : <Trash2 size={18} />}
+                        </button>
+                    </div>
                   </div>
 
                   <h3 className="font-bold text-gray-900 text-lg mb-1 leading-snug">{course.name}</h3>
@@ -206,7 +280,7 @@ export default function StaffCourses() {
                     </div>
                     <div className="flex items-center gap-1.5">
                       <Calendar size={16} className="text-indigo-400" />
-                      <span>Semester 1</span> {/* Placeholder if sem exists */}
+                      <span>Sem {course.semester || 1}</span>
                     </div>
                   </div>
                 </motion.div>
@@ -219,6 +293,7 @@ export default function StaffCourses() {
                 <thead>
                   <tr className="bg-gray-50 border-b border-gray-200 text-xs uppercase tracking-wider text-gray-500 font-semibold">
                     <th className="p-4 w-16 text-center">#</th>
+                    <th className="p-4">Type</th>
                     <th className="p-4">Course Details</th>
                     <th className="p-4">Code</th>
                     <th className="p-4">Year Level</th>
@@ -237,9 +312,19 @@ export default function StaffCourses() {
                       <td className="p-4 text-center text-gray-400 font-medium">{index + 1}</td>
                       
                       <td className="p-4">
+                         <span className={`text-xs px-2.5 py-1 rounded-full font-medium border ${
+                             course.category === 'Core'
+                             ? 'bg-indigo-50 text-indigo-700 border-indigo-100'
+                             : 'bg-purple-50 text-purple-700 border-purple-100'
+                         }`}>
+                             {course.category}
+                         </span>
+                      </td>
+
+                      <td className="p-4">
                         <div className="flex flex-col">
                           <span className="font-semibold text-gray-900 text-base">{course.name}</span>
-                          <span className="text-xs text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full w-fit mt-1 font-medium">
+                          <span className="text-xs text-gray-500 mt-1">
                             {course.acronym}
                           </span>
                         </div>
@@ -257,18 +342,27 @@ export default function StaffCourses() {
                       </td>
                       
                       <td className="p-4 text-center">
-                        <button
-                          onClick={() => deleteCourse(course._id, course.name)}
-                          disabled={deletingId === course._id}
-                          className="text-gray-400 hover:text-red-600 hover:bg-red-50 p-2 rounded-full transition-all mx-auto"
-                          title="Delete Course"
-                        >
-                          {deletingId === course._id ? (
-                            <Loader2 className="w-5 h-5 animate-spin text-red-500" />
-                          ) : (
-                            <Trash2 size={18} />
-                          )}
-                        </button>
+                        <div className="flex justify-center gap-2">
+                            <button
+                                onClick={() => initiateEdit(course)}
+                                className="text-gray-400 hover:text-blue-600 hover:bg-blue-50 p-2 rounded-full transition-all"
+                                title="Edit Course"
+                            >
+                                <Edit2 size={18} />
+                            </button>
+                            <button
+                            onClick={() => deleteCourse(course)}
+                            disabled={deletingId === course._id}
+                            className="text-gray-400 hover:text-red-600 hover:bg-red-50 p-2 rounded-full transition-all"
+                            title="Delete Course"
+                            >
+                            {deletingId === course._id ? (
+                                <Loader2 className="w-5 h-5 animate-spin text-red-500" />
+                            ) : (
+                                <Trash2 size={18} />
+                            )}
+                            </button>
+                        </div>
                       </td>
                     </motion.tr>
                   ))}
@@ -278,6 +372,118 @@ export default function StaffCourses() {
           </>
         )}
       </div>
+
+      {/* --- EDIT MODAL --- */}
+      <AnimatePresence>
+        {editingCourse && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                {/* Backdrop */}
+                <motion.div 
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    onClick={() => setEditingCourse(null)}
+                    className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
+                />
+                
+                {/* Modal Content */}
+                <motion.div 
+                    initial={{ opacity: 0, scale: 0.95, y: 20 }}
+                    animate={{ opacity: 1, scale: 1, y: 0 }}
+                    exit={{ opacity: 0, scale: 0.95, y: 20 }}
+                    className="relative bg-white w-full max-w-lg rounded-2xl shadow-xl overflow-hidden"
+                >
+                    <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between bg-gray-50/50">
+                        <div className="flex items-center gap-2">
+                            <h3 className="font-bold text-lg text-gray-900">Edit Course</h3>
+                            <span className={`text-xs px-2 py-0.5 rounded border ${
+                                editingCourse.category === 'Core' 
+                                ? 'bg-indigo-100 text-indigo-700 border-indigo-200' 
+                                : 'bg-purple-100 text-purple-700 border-purple-200'
+                            }`}>
+                                {editingCourse.category}
+                            </span>
+                        </div>
+                        <button onClick={() => setEditingCourse(null)} className="p-1 rounded-full hover:bg-gray-200 text-gray-500 transition">
+                            <X size={20} />
+                        </button>
+                    </div>
+
+                    <form onSubmit={saveUpdate} className="p-6 space-y-4">
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Course Name</label>
+                            <input 
+                                type="text" 
+                                name="name"
+                                required
+                                value={editingCourse.name} 
+                                onChange={handleEditChange}
+                                className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+                            />
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Course Code</label>
+                                <input 
+                                    type="text" 
+                                    name="code"
+                                    required
+                                    value={editingCourse.code} 
+                                    onChange={handleEditChange}
+                                    className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Acronym</label>
+                                <input 
+                                    type="text" 
+                                    name="acronym"
+                                    required
+                                    value={editingCourse.acronym} 
+                                    onChange={handleEditChange}
+                                    className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+                                />
+                            </div>
+                        </div>
+
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Year Level</label>
+                            <select 
+                                name="year"
+                                value={editingCourse.year}
+                                onChange={handleEditChange}
+                                className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none bg-white"
+                            >
+                                <option value="I">I</option>
+                                <option value="II">II</option>
+                                <option value="III">III</option>
+                                <option value="IV">IV</option>
+                            </select>
+                        </div>
+
+                        <div className="flex justify-end gap-3 pt-4 mt-2">
+                            <button 
+                                type="button"
+                                onClick={() => setEditingCourse(null)}
+                                className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition"
+                            >
+                                Cancel
+                            </button>
+                            <button 
+                                type="submit"
+                                disabled={isUpdating}
+                                className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 flex items-center gap-2 transition disabled:opacity-70 disabled:cursor-not-allowed"
+                            >
+                                {isUpdating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                                Save Changes
+                            </button>
+                        </div>
+                    </form>
+                </motion.div>
+            </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

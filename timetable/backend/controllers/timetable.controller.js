@@ -3,30 +3,23 @@ import Timetable from '../models/TimeTable.js';
 // --- SAVE TIMETABLE ---
 export const saveTimetable = async (req, res) => {
   try {
-    console.log("1. Backend Received Save Request");
-    
-    // The frontend sends { timetable: { ... } }
     const { timetable } = req.body;
 
     if (!timetable) {
-      console.log("Error: No timetable data in body");
       return res.status(400).json({ success: false, message: "Timetable data is missing" });
     }
 
-    // --- THE FIX IS HERE ---
-    // We create a new entry using 'data' because that is what your Model uses.
     const newEntry = new Timetable({
-      data: timetable,  // Map frontend 'timetable' -> DB 'data'
-      updatedBy: 'Admin' // Optional, based on your model
+      data: timetable,
+      updatedBy: req.user ? req.user.id : 'Admin' // uses Auth user if available
     });
 
     const saved = await newEntry.save();
-    console.log("2. Database Saved Successfully:", saved._id);
 
     res.status(201).json({ 
       success: true, 
       message: "Timetable saved successfully", 
-      id: saved._id 
+      data: saved // Return the whole object so frontend gets the ID
     });
 
   } catch (error) {
@@ -41,19 +34,20 @@ export const getTimetable = async (req, res) => {
     const { id } = req.query;
     let record;
 
-    if (id) {
+    if (id && id !== 'undefined' && id !== 'null') {
       record = await Timetable.findById(id);
     } else {
-      // Get the most recent one
-      record = await Timetable.findOne().sort({ lastUpdated: -1 });
+      // FIX: Sort by 'createdAt' (Mongoose default) instead of 'lastUpdated'
+      // unless you specifically added 'lastUpdated' to your Schema.
+      record = await Timetable.findOne().sort({ createdAt: -1 });
     }
 
     if (!record) {
+      // This sends 404 if DB is empty -> Frontend sees this and loads Mock Data.
+      // This is expected behavior for a new app.
       return res.status(404).json({ success: false, message: "No timetable found" });
     }
 
-    // --- THE FIX IS ALSO HERE ---
-    // Your model stores it in 'data', so we must send back 'record.data'
     res.status(200).json({ 
       success: true, 
       data: record.data, 
@@ -66,22 +60,31 @@ export const getTimetable = async (req, res) => {
   }
 };
 
-// --- GET HISTORY (Optional) ---
+// --- GET HISTORY ---
 export const getHistory = async (req, res) => {
     try {
-        // Fetch ID and Date for the dropdown list
-        const list = await Timetable.find({}, '_id lastUpdated').sort({ lastUpdated: -1 });
+        // FIX: Select 'createdAt' so the frontend can display the date
+        const list = await Timetable.find({}, '_id createdAt updatedBy').sort({ createdAt: -1 });
         res.status(200).json({ success: true, data: list });
     } catch (error) {
         res.status(500).json({ message: "Error fetching history" });
     }
 };
 
-// --- DELETE (Optional) ---
+// --- DELETE ---
 export const deleteTimetable = async (req, res) => {
     try {
-        await Timetable.deleteMany({});
-        res.status(200).json({ message: "All timetables deleted" });
+        const { id } = req.query;
+
+        // FIX: Only delete the specific ID, not the whole database!
+        if (id) {
+            await Timetable.findByIdAndDelete(id);
+            res.status(200).json({ success: true, message: "Version deleted" });
+        } else {
+            // Only delete all if explicitly intended (optional safety)
+            // await Timetable.deleteMany({}); 
+            res.status(400).json({ success: false, message: "No ID provided for deletion" });
+        }
     } catch (error) {
         res.status(500).json({ message: "Error deleting" });
     }

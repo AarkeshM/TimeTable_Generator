@@ -9,6 +9,10 @@ import courseRoutes from "./routes/course.routes.js";
 import staffRoutes from "./routes/staff.routes.js";
 import allocationRoutes from "./routes/allocations.routes.js";
 import timetableRoutes from "./routes/timetable.routes.js";
+import manualallocation from "./routes/manualallocation.routes.js";
+import electiveCourseRoutes from "./routes/electivecourse.routes.js";
+import electiveAllocationRoutes from "./routes/electiveallocation.routes.js";
+import facultyRoutes from "./routes/facultyTimetable.routes.js";
 
 dotenv.config();
 const app = express();
@@ -29,6 +33,10 @@ app.use("/api/courses", courseRoutes);
 app.use("/api/staff", staffRoutes);
 app.use("/api/allocations", allocationRoutes);
 app.use("/api/timetable", timetableRoutes);
+app.use("/api/manualallocations", manualallocation);
+app.use("/api/elective-courses", electiveCourseRoutes);
+app.use("/api/elective-allocations", electiveAllocationRoutes);
+app.use("/api/faculty-timetable", facultyRoutes);
 // --- Test Route ---
 app.get("/", (req, res) => res.send("API Running"));
 

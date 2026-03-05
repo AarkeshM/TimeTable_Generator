@@ -23,6 +23,9 @@ const AllocationSchema = new mongoose.Schema({
     type: Number, // e.g., 5 hours
     required: true,
   },
+  lab: {
+    type: Number,
+  },
   assignedBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "User", // Links to the Admin who did this

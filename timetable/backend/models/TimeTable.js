@@ -6,6 +6,10 @@ const TimetableSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.Mixed,
     required: true
   },
+  createdAt: {
+    type: Date,
+    default: Date.now
+  },
   lastUpdated: {
     type: Date,
     default: Date.now

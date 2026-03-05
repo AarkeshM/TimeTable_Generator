@@ -229,68 +229,59 @@ def collect_year_subjects(req_form):
 # NEW API ENDPOINTS FOR REACT FRONTEND
 # =================================================================
 
+# In your app.py, update the /api/generate-timetable route:
+
 @app.route('/api/generate-timetable', methods=['POST'])
 def api_generate_timetable():
     """
     API Endpoint for React Dashboard.
-    1. Fetches subjects from MongoDB.
-    2. Runs AI generation logic.
-    3. Returns JSON response.
     """
     try:
-        # 1. Fetch Subjects automatically from Mongo
-        db_inputs = {}
-        found_allocations = False
-
-        for year_label in YEARS:
-            subjects = get_subjects_from_mongo(year_label)
-            if subjects:
-                db_inputs[year_label] = subjects
-                found_allocations = True
-            else:
-                db_inputs[year_label] = []
-
-        if not found_allocations:
+        # Import from ai_logic
+        from ai_logic import fetch_and_prepare_data, generate_all
+        
+        # 1. Fetch data from database
+        year_section_data = fetch_and_prepare_data()
+        
+        if not year_section_data:
             return jsonify({
                 "success": False, 
-                "message": "No Staff/Course allocations found in Database. Please allocate courses first."
+                "message": "No course allocations found in database."
             }), 400
-
-        # 2. Run the AI Generator
-        generated_data = generate_all(db_inputs)
-
-        # 3. Convert DataFrames to JSON
+        
+        # 2. Generate timetables for ALL sections
+        generated_data = generate_all(year_section_data)
+        
+        # 3. Convert to JSON response
         json_response = {}
         
         for year, sections in generated_data.items():
             json_response[year] = {}
             for sec, (df, hours) in sections.items():
-                # Clean Data for JSON (replace NaNs with empty string)
+                # Clean DataFrame
                 df_clean = df.fillna("")
                 
-                # Convert DataFrame to List of Lists (Rows)
-                table_data = df_clean.reset_index().values.tolist() # Includes 'Day' as first column
-                
-                # Get Column Headers (Time Slots)
-                columns = ["Time"] + df_clean.columns.tolist()
+                # Convert to list format
+                table_data = df_clean.reset_index().values.tolist()
+                columns = ["Day"] + df_clean.columns.tolist()
                 
                 json_response[year][sec] = {
                     "columns": columns,
                     "data": table_data,
                     "hours": hours
                 }
-
+        
         return jsonify({
             "success": True, 
-            "message": "Timetable Generated Successfully",
+            "message": f"Timetable generated for {sum(len(s) for s in json_response.values())} sections",
             "timetable": json_response
         })
-
+        
     except Exception as e:
         print(f"Generation Error: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({"success": False, "message": str(e)}), 500
-
-
 # =================================================================
 # LEGACY HTML ROUTES (Keep these if you still want to use the old UI)
 # =================================================================

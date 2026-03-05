@@ -11,6 +11,7 @@ import TimetableManagement from "./pages/AdminTimetable.jsx";
 import AdminSettings from "./pages/AdminSettingPage.jsx";
 import Contact from "./components/Contact.jsx";
 import TimetablePage from "./pages/TimetablePage.jsx";
+import AdminStaffTimetable from "./pages/AdminStaffTimetable.jsx";
 
 export default function App() {
   return (
@@ -27,6 +28,7 @@ export default function App() {
       <Route path="/admin/settings" element={<AdminSettings />} />
       <Route path="/contact" element={<Contact />} />
       <Route path="/admin/timetable" element={<TimetablePage />} />
+      <Route path="/admin/staff-timetable" element={<AdminStaffTimetable />} />
     </Routes>
   );
 }

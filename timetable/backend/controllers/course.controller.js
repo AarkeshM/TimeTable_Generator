@@ -4,125 +4,174 @@ import mongoose from "mongoose";
 // --- ADD COURSE ---
 export const addCourse = async (req, res) => {
     try {
-        const { name, code, acronym, year } = req.body;
+        const { name, code, acronym, year, staffId } = req.body;
 
+        // 1. Basic Validation
         if (!name || !code || !acronym || !year) {
             return res.status(400).json({ message: "All fields are required." });
         }
 
-        // Check if course code already exists
-        const existing = await Course.findOne({ code });
+        // 2. CHECK DUPLICATES (Scoped to User)
+        // This ensures the LOGGED IN user hasn't already added this code.
+        const existing = await Course.findOne({ 
+            code: code, 
+            CreatedBy: req.user.id 
+        });
+
         if (existing) {
-            return res.status(400).json({ message: "Course code already exists." });
+            return res.status(400).json({ message: "You have already added this course code." });
         }
 
         console.log("Creating course for User:", req.user?.id);
 
+        // 3. Create Course
         const course = await Course.create({
             name,
             code,
             acronym,
             year,
-            // ✅ CHANGED: Uses req.user.id now
+            // Use staffId passed from frontend, or fallback to the logged-in user ID
+            staffId: staffId || req.user.id, 
             CreatedBy: req.user.id 
         });
 
         res.status(201).json({ message: "Course added successfully", course });
+
     } catch (error) {
-        console.error("Add Course Error:", error);
+        console.error("❌ Add Course Error:", error);
+        
+        // Specific handling for MongoDB Duplicate Key Error (Just in case)
+        if (error.code === 11000) {
+             return res.status(400).json({ message: "A technical duplicate error occurred. Please check your database indexes." });
+        }
+
         res.status(500).json({ message: "Server error while adding course." });
     }
 };
 
-// --- GET COURSES (UPDATED FOR ADMIN ACCESS) ---
+// --- GET COURSES ---
 export const getCourse = async (req, res) => {
     try {
-        // 1. Security Check
         if (!req.user || !req.user.id) {
-            return res.status(401).json({ message: "Unauthorized. User information missing." });
+            return res.status(401).json({ message: "Unauthorized" });
         }
 
-        console.log(`Fetching courses. User: ${req.user.name}, Role: ${req.user.role}`);
-
-        // 2. DEFINE QUERY BASED ON ROLE
         let query = {};
-
-        // If the user is NOT an admin, restrict them to their own courses.
-        // If the user IS an admin, 'query' remains empty {}, which fetches ALL courses.
+        // If not admin, only show courses created by this user
         if (req.user.role !== "admin") {
             query = { CreatedBy: req.user.id };
         }
 
-        // 3. Fetch courses
-        // .populate("CreatedBy", "name") is important so the Admin sees WHO created the course
-        const courses = await Course.find(query).populate("CreatedBy", "name email");
+        const courses = await Course.find(query)
+            .populate("CreatedBy", "name email")
+            .populate("staffId", "name email");
 
-        if (!courses || courses.length === 0) {
-            return res.status(200).json({ message: "No courses found.", courses: [] });
-        }
-
-        res.status(200).json({ 
+        res.status(200).json({
             count: courses.length,
-            courses 
+            courses,
         });
-        
     } catch (error) {
         console.error("Get Courses Error:", error);
-        res.status(500).json({ message: "Server error while fetching courses." });
+        res.status(500).json({ message: "Server error while fetching courses" });
+    }
+};
+
+// --- UPDATE COURSE ---
+export const updateCourse = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { name, code, acronym, year } = req.body;
+
+        // 1. Validate ID format
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({ message: "Invalid Course ID format." });
+        }
+
+        // 2. Find the existing course
+        const course = await Course.findById(id);
+
+        if (!course) {
+            return res.status(404).json({ message: "Course not found." });
+        }
+
+        // 3. Authorization Check
+        // Only the Creator or an Admin can update
+        const loggedUserId = req.user.id.toString();
+        const courseCreatorId = course.CreatedBy?.toString();
+
+        if (req.user.role !== 'admin' && courseCreatorId !== loggedUserId) {
+            return res.status(403).json({ message: "You are not authorized to update this course." });
+        }
+
+        // 4. Check for Duplicate Code (Only if the code is being changed)
+        // If the user is changing "CS101" to "CS102", make sure they don't ALREADY have "CS102".
+        if (code && code !== course.code) {
+            const existing = await Course.findOne({ 
+                code: code, 
+                CreatedBy: req.user.id 
+            });
+
+            if (existing) {
+                return res.status(400).json({ message: "You already have another course with this code." });
+            }
+        }
+
+        // 5. Perform Update
+        const updatedCourse = await Course.findByIdAndUpdate(
+            id,
+            {
+                name, 
+                code, 
+                acronym, 
+                year
+            },
+            { new: true, runValidators: true } // Return the new document & run schema validations
+        );
+
+        res.status(200).json({ 
+            message: "Course updated successfully", 
+            course: updatedCourse 
+        });
+
+    } catch (error) {
+        console.error("❌ Update Course Error:", error);
+        
+        if (error.code === 11000) {
+             return res.status(400).json({ message: "Duplicate error: This course code might already exist." });
+        }
+
+        res.status(500).json({ message: "Server error while updating course." });
     }
 };
 
 // --- DELETE COURSE ---
 export const deleteCourse = async (req, res) => {
-    console.log("🗑️ DELETE COURSE ENDPOINT HIT");
-    console.log("👤 User from middleware:", req.user);
-    console.log("🎯 Course ID to delete:", req.params.id);
-
     try {
         const courseId = req.params.id;
 
-        // 1. INPUT VALIDATION
         if (!mongoose.Types.ObjectId.isValid(courseId)) {
-            console.log("❌ Invalid course ID format");
             return res.status(400).json({ message: "Invalid Course ID format." });
         }
 
-        // 2. AUTHENTICATION CHECK
-        // ✅ CHANGED: Checks for req.user.id
-        if (!req.user || !req.user.id) {
-            console.log("❌ Authentication failed - no user found");
-            return res.status(401).json({ message: "Authentication required." });
-        }
-
-        // Get the course to check existence and creator
         const course = await Course.findById(courseId);
         
-        // 3. EXISTENCE CHECK
         if (!course) {
-            console.log("❌ Course not found in database");
             return res.status(404).json({ message: "Course not found." });
         }
 
-        // 4. AUTHORIZATION CHECK (Ownership)
-        // ✅ CHANGED: Uses req.user.id
         const loggedUserId = req.user.id.toString(); 
         const courseCreatorId = course.CreatedBy?.toString();
 
-        console.log(`Checking ownership: User ${loggedUserId} vs Creator ${courseCreatorId}`);
-
-        if (courseCreatorId !== loggedUserId) {
-            console.log("❌ Authorization failed - user doesn't own this course");
+        if (req.user.role !== 'admin' && courseCreatorId !== loggedUserId) {
             return res.status(403).json({ message: "You are not allowed to delete this course." });
         }
 
-        // 5. DELETE OPERATION
         await Course.findByIdAndDelete(courseId);
 
-        console.log("✅ Course deleted successfully");
         return res.status(200).json({ message: "Course deleted successfully." });
 
     } catch (error) {
-        console.error("❌ Delete Course Error:", error);
+        console.error("Delete Course Error:", error);
         return res.status(500).json({ message: "Server error while deleting course." });
     }
 };

@@ -3,7 +3,7 @@ import Allocation from "../models/Allocations.js";
 // --- CREATE ALLOCATION ---
 export const createAllocation = async (req, res) => {
   try {
-    const { staffId, courseId, year, section, periods } = req.body;
+    const { staffId, courseId, year, section, periods, lab } = req.body;
 
     // 1. Validation
     if (!staffId || !courseId || !year || !section || !periods) {
@@ -17,6 +17,7 @@ export const createAllocation = async (req, res) => {
       year,
       section,
       periods,
+      lab,
       assignedBy: req.user.id // Taken from the Admin's token
     });
 
@@ -67,6 +68,45 @@ export const deleteAllocation = async (req, res) => {
     await Allocation.findByIdAndDelete(req.params.id);
     res.status(200).json({ message: "Allocation removed successfully" });
   } catch (error) {
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+// --- UPDATE ALLOCATION ---
+export const updateAllocation = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { staffId, courseId, year, section, periods, lab } = req.body;
+
+    // 1. Check if the allocation exists and update it
+    // { new: true } returns the document AFTER the update is applied
+    const updatedAllocation = await Allocation.findByIdAndUpdate(
+      id,
+      { staffId, courseId, year, section, periods, lab },
+      { new: true, runValidators: true }
+    );
+
+    if (!updatedAllocation) {
+      return res.status(404).json({ message: "Allocation not found" });
+    }
+
+    // 2. Populate references so the UI has the latest names
+    await updatedAllocation.populate([
+      { path: "staffId", select: "name email" },
+      { path: "courseId", select: "name code acronym" }
+    ]);
+
+    res.status(200).json({
+      success: true,
+      message: "Allocation updated successfully",
+      allocation: updatedAllocation,
+    });
+
+  } catch (error) {
+    if (error.code === 11000) {
+      return res.status(400).json({ message: "This faculty is already assigned to this course/section." });
+    }
+    console.error("Update Allocation Error:", error);
     res.status(500).json({ message: "Server error" });
   }
 };

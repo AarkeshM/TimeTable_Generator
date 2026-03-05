@@ -1,83 +1,21 @@
+# ai_logic.py - FIXED LAB ALLOCATION (ONE LAB PER DAY)
 import os
 import random
 import pandas as pd
 from collections import defaultdict
 from pymongo import MongoClient
 from bson.objectid import ObjectId
-from dotenv import load_dotenv  # <--- NEW: Import dotenv
+from dotenv import load_dotenv
 
 # =========================================================
-# 1. DATABASE CONFIGURATION
+# 1. CONFIGURATION
 # =========================================================
-
-# Load environment variables from .env file
-load_dotenv() 
-
-# Get the MONGO_URI from the environment (secure way)
-MONGO_URI = os.getenv("MONGO_URI")
-
-# Fallback in case .env is missing or variable is empty (useful for debugging)
-if not MONGO_URI:
-    print("WARNING: MONGO_URI not found in .env file. Attempting localhost default.")
-    MONGO_URI = "mongodb://localhost:27017/"
-
-# ✅ FIX 1: Default Mongoose DB name is 'test'. 
-# If you named it something else in mongoose.connect(), change it here.
+load_dotenv()
+MONGO_URI = os.getenv("MONGO_URI", "mongodb+srv://aarkeshcse2023_db_user:aarkeshharry@cluster0.s81ocvf.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0")
 DB_NAME = "test"
 
-def fetch_subjects_from_db(year_string, department=None):
-    """
-    Connects to MongoDB and fetches course names for a specific year.
-    Performs a Lookup to get the Course Name from the Course ID.
-    """
-    client = MongoClient(MONGO_URI)
-    db = client[DB_NAME]
-    
-    # Define the match criteria
-    # ✅ FIX 2: Schema uses "I", "II" (Strings), not Integers.
-    match_query = {"year": year_string}
-    
-    # Note: I removed the 'department' filter because your Allocation schema 
-    # didn't show a department field. If you add it later, uncomment below.
-    # if department:
-    #     match_query["department"] = department
-
-    pipeline = [
-        # 1. Filter by Year
-        {"$match": match_query},
-        
-        # 2. Join with 'courses' collection to get name
-        # ✅ FIX 3: Local field is 'courseId' in your schema, not 'course'
-        {"$lookup": {
-            "from": "courses", 
-            "localField": "courseId",
-            "foreignField": "_id",
-            "as": "course_info"
-        }},
-        
-        # 3. Unwind the array (since lookup returns an array)
-        {"$unwind": "$course_info"},
-        
-        # 4. Project only the course name
-        {"$project": {
-            "_id": 0,
-            "subject_name": "$course_info.name", 
-            "subject_code": "$course_info.code"
-        }}
-    ]
-    
-    # ✅ FIX 4: Mongoose model "Allocation" becomes "allocations" collection
-    results = list(db.allocations.aggregate(pipeline))
-    
-    # Extract just the list of names
-    subject_list = [item['subject_name'] for item in results]
-    
-    # Remove duplicates
-    client.close()
-    return list(set(subject_list))
-
 # =========================================================
-# 2. DAYS & TIME SLOTS (UNCHANGED)
+# 2. DAYS & TIME SLOTS
 # =========================================================
 DAYS = ["MON", "TUE", "WED", "THU", "FRI", "SAT"]
 TIME_SLOTS = [
@@ -99,7 +37,7 @@ for d in DAYS:
 LUNCH_HTML = "<div class='vertical-text'>L<br>U<br>N<br>C<br>H</div>"
 
 # =========================================================
-# 3. YEAR SECTIONS & LOGIC
+# 3. YEAR SECTIONS
 # =========================================================
 YEAR_SECTIONS = {
     "1st Year": ["A", "B", "C"],
@@ -108,7 +46,6 @@ YEAR_SECTIONS = {
     "4th Year": ["A", "B"],
 }
 
-# ✅ FIX 5: Mapping Year Labels to Schema Values (Roman Numerals)
 YEAR_MAP_DB = {
     "1st Year": "I",
     "2nd Year": "II",
@@ -122,228 +59,489 @@ LAB_SLOTS = [
 ]
 
 # =========================================================
-# 4. ALGORITHM HELPERS (UNCHANGED)
+# 4. DATABASE FUNCTIONS
 # =========================================================
-def is_lab(s):
-    return "lab" in str(s).lower()
-
-def auto_assign_hours(subjects, rnd):
-    hours = {}
-    theory_subjects = [s for s in subjects if not is_lab(s)]
-    lab_subjects = [s for s in subjects if is_lab(s)]
-
-    total_periods = len(DAYS) * (len(TIME_SLOTS) - 1) 
+def fetch_and_prepare_data():
+    """
+    Fetch data and organize by year and section
+    Returns: {
+        year_label: {
+            'A': {subject: periods},
+            'B': {subject: periods},
+            ...
+        }
+    }
+    """
+    print("🔍 Fetching data from database...")
     
-    for lab in lab_subjects:
-        hours[lab] = 3
+    try:
+        client = MongoClient(MONGO_URI)
+        db = client[DB_NAME]
+        
+        # Get all allocations
+        allocations = list(db.allocations.find())
+        if not allocations:
+            print("❌ No allocations found!")
+            client.close()
+            return {}
+        
+        print(f"✅ Found {len(allocations)} allocations")
+        
+        # Get all courses
+        courses = list(db.courses.find())
+        courses_dict = {str(course['_id']): course for course in courses}
+        print(f"✅ Found {len(courses)} courses")
+        
+        # Get all staff
+        staff = list(db.users.find({"role": "staff"}))
+        staff_dict = {str(s['_id']): s for s in staff}
+        
+        # Organize data by year and section
+        year_section_data = {}
+        
+        for alloc in allocations:
+            year_str = alloc.get('year', '').strip()
+            section = alloc.get('section', 'A').strip().upper()
+            
+            # Handle periods
+            periods = alloc.get('periods', 0) or 0
+            lab_periods = alloc.get('lab', 0) or 0
+            total_periods = periods + lab_periods
+            
+            if not year_str or total_periods == 0:
+                continue
+            
+            # Map year to label
+            year_label = YEAR_MAP_DB.get(year_str, f"Year {year_str}")
+            
+            # Get course details
+            course_id = str(alloc.get('courseId', ''))
+            course = courses_dict.get(course_id)
+            
+            if not course:
+                continue
+            
+            # Get subject name
+            subject_name = course.get('name', 'Unknown').strip()
+            if not subject_name:
+                subject_name = course.get('code', 'Unknown').strip()
+            
+            # Get faculty name
+            faculty_name = "Unknown"
+            staff_id = str(alloc.get('staffId', ''))
+            if staff_id in staff_dict:
+                faculty = staff_dict[staff_id]
+                faculty_name = faculty.get('name', faculty.get('username', 'Unknown')).strip()
+            
+            # Initialize data structure
+            if year_label not in year_section_data:
+                year_section_data[year_label] = {}
+            
+            if section not in year_section_data[year_label]:
+                year_section_data[year_label][section] = {}
+            
+            # Create subject key
+            subject_key = f"{subject_name}"
+            if faculty_name != "Unknown":
+                subject_key = f"{subject_name} ({faculty_name})"
+            
+            # Store subject
+            year_section_data[year_label][section][subject_key] = total_periods
+        
+        client.close()
+        
+        # Print summary
+        print("\n📊 DATABASE DATA SUMMARY:")
+        print("="*60)
+        
+        for year_label, sections in year_section_data.items():
+            print(f"\n{year_label}:")
+            total_subjects = 0
+            total_periods = 0
+            
+            for section, subjects in sections.items():
+                section_subjects = len(subjects)
+                section_periods = sum(subjects.values())
+                total_subjects += section_subjects
+                total_periods += section_periods
+                
+                print(f"  Section {section}: {section_subjects} subjects, {section_periods} periods")
+                for subject, periods in subjects.items():
+                    lab_marker = " (Lab)" if is_lab(subject) else ""
+                    print(f"    - {subject}: {periods}{lab_marker}")
+            
+            print(f"  TOTAL: {total_subjects} subjects, {total_periods} periods")
+        
+        return year_section_data
+        
+    except Exception as e:
+        print(f"❌ Error: {e}")
+        import traceback
+        traceback.print_exc()
+        return {}
 
-    total_lab_hours = len(lab_subjects) * 3
-    remaining = total_periods - total_lab_hours
+# =========================================================
+# 5. LAB ALLOCATION FUNCTIONS (FIXED - ONE LAB PER DAY)
+# =========================================================
+def is_lab(subject):
+    subject_lower = subject.lower()
+    lab_keywords = ['lab', 'laboratory', 'practical', 'workshop', 'experiment']
+    return any(keyword in subject_lower for keyword in lab_keywords)
 
-    if remaining < 0:
-        while remaining < 0 and lab_subjects:
-            lab_subjects.pop()
-            total_lab_hours = len(lab_subjects) * 3
-            remaining = total_periods - total_lab_hours
-        hours = {lab: 3 for lab in lab_subjects}
+def allocate_labs_one_per_day(tt, labs, rnd):
+    """
+    Allocate labs with ONE LAB PER DAY rule
+    Each lab gets 3 continuous periods on a separate day
+    """
+    print(f"    🔬 Allocating {len(labs)} labs (one lab per day)...")
+    
+    # Days available for labs (no Saturday for labs)
+    available_days = [d for d in DAYS if d != "SAT"]
+    rnd.shuffle(available_days)
+    
+    labs_placed = 0
+    
+    for lab in labs:
+        placed = False
+        
+        for day in available_days:
+            # Check if this day already has a lab
+            day_has_lab = False
+            for period in range(9):
+                if period != 4 and is_lab(tt[day][period]):
+                    day_has_lab = True
+                    break
+            
+            if day_has_lab:
+                continue  # Skip this day, already has a lab
+            
+            # Try both lab slot configurations
+            for slot in LAB_SLOTS:
+                # Check if slot is completely empty
+                if all(tt[day][i] == "" for i in slot):
+                    # Place the lab
+                    for i in slot:
+                        tt[day][i] = lab
+                    print(f"      ✅ {lab} -> {day} periods {slot}")
+                    labs_placed += 1
+                    placed = True
+                    break
+            
+            if placed:
+                # Remove this day from available days
+                available_days.remove(day)
+                break
+        
+        if not placed:
+            print(f"      ❌ Could not place lab: {lab}")
+    
+    print(f"    ✅ Placed {labs_placed}/{len(labs)} labs")
+    return labs_placed
 
-    if theory_subjects:
-        base = remaining // len(theory_subjects)
-        extra = remaining % len(theory_subjects)
-        for s in theory_subjects:
-            hours[s] = base
-        for i in range(extra):
-            hours[theory_subjects[i]] += 1
-
-    return hours
-
-def assign_first_period_unique(tt, theory, rnd):
+def assign_first_period_unique(tt, subjects, rnd):
+    """Assign unique non-lab subjects to first period"""
     FIRST = 0
-    theory_no_lab = [s for s in theory if not is_lab(s)]
-    if not theory_no_lab: return {}
-
-    if len(theory_no_lab) < len(DAYS):
-        theory_no_lab = theory_no_lab * 2
-
-    rnd.shuffle(theory_no_lab)
+    eligible = [s for s in subjects if not is_lab(s)]
+    if not eligible:
+        return {}
+    
+    if len(eligible) < len(DAYS):
+        eligible = eligible * 2
+    
+    rnd.shuffle(eligible)
     used = set()
     assigned = {}
-
+    
     for day in DAYS:
-        valid = [s for s in theory_no_lab if s not in used]
+        valid = [s for s in eligible if s not in used]
         if not valid:
-            valid = [s for s in theory_no_lab]
-
+            valid = eligible
+        
         pick = rnd.choice(valid)
         used.add(pick)
         tt[day][FIRST] = pick
         assigned[day] = pick
+    
     return assigned
 
-def assign_last_period_unique(tt, theory, rnd):
+def assign_last_period_unique(tt, subjects, rnd):
+    """Assign unique non-lab subjects to last period"""
     LAST = 8
-    theory_no_lab = [s for s in theory if not is_lab(s)]
-    if not theory_no_lab: return {}
-
-    if len(theory_no_lab) < len(DAYS):
-        theory_no_lab = theory_no_lab * 2
-
-    rnd.shuffle(theory_no_lab)
+    eligible = [s for s in subjects if not is_lab(s)]
+    if not eligible:
+        return {}
+    
+    if len(eligible) < len(DAYS):
+        eligible = eligible * 2
+    
+    rnd.shuffle(eligible)
     used = set()
     assigned = {}
-
+    
     for day in DAYS:
-        valid = [s for s in theory_no_lab if s not in used]
+        valid = [s for s in eligible if s not in used]
         if not valid:
-            valid = [s for s in theory_no_lab]
-
+            valid = eligible
+        
         pick = rnd.choice(valid)
         used.add(pick)
         tt[day][LAST] = pick
         assigned[day] = pick
+    
     return assigned
 
-def place_labs(tt, labs, rnd, forbidden=None):
-    if forbidden is None: forbidden = {}
-    placements = []
-    days_used = set()
-
-    for lab in labs:
-        placed = False
-        candidates = [d for d in DAYS[:-1] if d not in days_used] # No Sat
-        rnd.shuffle(candidates)
-
-        for day in candidates:
-            if day in forbidden.get(lab, set()): continue
-            
-            slots_try = LAB_SLOTS.copy()
-            rnd.shuffle(slots_try)
-            
-            for slot in slots_try:
-                if all(tt[day][i] == "" for i in slot):
-                    for i in slot: tt[day][i] = lab
-                    placements.append((lab, day, slot))
-                    days_used.add(day)
-                    placed = True
-                    break
-            if placed: break
-    return placements
-
-def place_theory_subjects(tt, theory, hours_left, first_assign, last_assign, rnd):
-    for d, s in first_assign.items():
-        if s in hours_left: hours_left[s] -= 1
-    for d, s in last_assign.items():
-        if s in hours_left: hours_left[s] -= 1
-
-    empty = []
+def place_theory_subjects(tt, subjects, periods_left, first_assign, last_assign, rnd):
+    """Place theory subjects respecting exact period counts"""
+    # Track placed periods
+    placed_count = 0
+    
+    # Deduct first and last periods
+    for day, subject in first_assign.items():
+        if subject in periods_left:
+            periods_left[subject] = max(0, periods_left[subject] - 1)
+            placed_count += 1
+            print(f"      First period: {subject} on {day}")
+    
+    for day, subject in last_assign.items():
+        if subject in periods_left:
+            periods_left[subject] = max(0, periods_left[subject] - 1)
+            placed_count += 1
+            print(f"      Last period: {subject} on {day}")
+    
+    # Get all empty slots
+    empty_slots = []
     for day in DAYS:
         for idx in range(len(TIME_SLOTS)):
-            if idx == 4: continue
-            if tt[day][idx] == "": empty.append((day, idx))
-
-    rnd.shuffle(empty)
-    sat_used = set()
-
-    for (day, idx) in empty:
-        prev = tt[day][idx-1] if idx > 0 and idx-1 != 4 else None
-        nxt = tt[day][idx+1] if idx < 8 and idx+1 != 4 else None
-
-        pool = [s for s in theory if hours_left.get(s, 0) > 0]
-        pool = [s for s in pool if s != prev and s != nxt]
-
-        if day == "SAT":
-            pool = [s for s in pool if s not in sat_used]
-
-        if day != "SAT":
-            limited = [s for s in pool if sum(1 for j in range(9) if tt[day][j] == s) < 2]
-            if limited: pool = limited
-
-        if not pool: pool = [s for s in theory if s != prev and s != nxt]
-        if not pool: pool = [s for s in theory if s != prev]
+            if idx == 4:  # Skip lunch
+                continue
+            if tt[day][idx] == "":
+                empty_slots.append((day, idx))
+    
+    rnd.shuffle(empty_slots)
+    
+    print(f"      Empty slots: {len(empty_slots)}")
+    print(f"      Periods to place: {sum(periods_left.values())}")
+    
+    # Place remaining subjects
+    for day, idx in empty_slots:
+        if sum(periods_left.values()) == 0:
+            break
+        
+        # Check adjacent periods
+        prev_subject = tt[day][idx-1] if idx > 0 and idx-1 != 4 else None
+        next_subject = tt[day][idx+1] if idx < 8 and idx+1 != 4 else None
+        
+        # Get available subjects
+        pool = [s for s in subjects if periods_left.get(s, 0) > 0]
+        
+        # Avoid consecutive same subject
+        if prev_subject:
+            pool = [s for s in pool if s != prev_subject]
+        if next_subject:
+            pool = [s for s in pool if s != next_subject]
+        
+        # Apply daily limit (max 2 periods per day per subject)
+        limited = []
+        for s in pool:
+            daily_count = sum(1 for j in range(9) if tt[day][j] == s)
+            if daily_count < 2:
+                limited.append(s)
+        if limited:
+            pool = limited
         
         if pool:
             pick = rnd.choice(pool)
             tt[day][idx] = pick
-            if pick in hours_left: hours_left[pick] -= 1
-            if day == "SAT": sat_used.add(pick)
+            periods_left[pick] = max(0, periods_left[pick] - 1)
+            placed_count += 1
+    
+    # Check for unplaced periods
+    unplaced = sum(periods_left.values())
+    if unplaced > 0:
+        print(f"      ⚠️ {unplaced} periods could not be placed")
+        for subject, remaining in periods_left.items():
+            if remaining > 0:
+                print(f"        - {subject}: {remaining} periods unplaced")
+    
+    print(f"      ✅ Placed {placed_count} total periods")
 
 # =========================================================
-# 5. GENERATORS (UNCHANGED)
+# 6. TIMETABLE GENERATION
 # =========================================================
-def generate_single(subjects, seed=None, forbidden=None):
+def generate_single_section(subjects_with_hours, section_name, seed=None):
+    """Generate timetable for a single section"""
     rnd = random.Random(seed)
     tt = {d: BASE_TEMPLATE[d][:] for d in DAYS}
-
+    
+    subjects = list(subjects_with_hours.keys())
     labs = [s for s in subjects if is_lab(s)]
     theory = [s for s in subjects if not is_lab(s)]
-
-    if not theory and not labs:
-        theory = ["Free Period"]
-
-    hours = auto_assign_hours(subjects, rnd)
-    first_assign = assign_first_period_unique(tt, theory, rnd)
-    last_assign = assign_last_period_unique(tt, theory, rnd)
-    placements = place_labs(tt, labs, rnd, forbidden)
-
-    hours_left = hours.copy()
-    place_theory_subjects(tt, theory, hours_left, first_assign, last_assign, rnd)
-
+    
+    periods = subjects_with_hours.copy()
+    
+    print(f"\n    📚 Section {section_name}")
+    print(f"    Total subjects: {len(subjects)}")
+    print(f"    Theory subjects: {len(theory)}")
+    print(f"    Lab subjects: {len(labs)}")
+    print(f"    Total periods: {sum(periods.values())}")
+    
+    # Check if we have too many labs for available days
+    if len(labs) > len([d for d in DAYS if d != "SAT"]):
+        print(f"    ⚠️ Warning: Too many labs ({len(labs)}) for available days!")
+    
+    # Step 1: Allocate labs (ONE LAB PER DAY)
+    allocate_labs_one_per_day(tt, labs, rnd)
+    
+    # Step 2: Assign first periods (unique subjects)
+    print(f"\n    🕘 Assigning first periods...")
+    first_assign = assign_first_period_unique(tt, subjects, rnd)
+    
+    # Step 3: Assign last periods (unique subjects)
+    print(f"\n    🕔 Assigning last periods...")
+    last_assign = assign_last_period_unique(tt, subjects, rnd)
+    
+    # Step 4: Place theory subjects
+    print(f"\n    📖 Placing theory subjects...")
+    periods_left = periods.copy()
+    place_theory_subjects(tt, theory, periods_left, first_assign, last_assign, rnd)
+    
+    # Format lunch
     for d in DAYS:
-        if tt[d][4] == "LUNCH": tt[d][4] = LUNCH_HTML
-
+        if tt[d][4] == "LUNCH": 
+            tt[d][4] = LUNCH_HTML
+    
     df = pd.DataFrame(tt, index=TIME_SLOTS).T
-    return df, hours, placements, first_assign, last_assign
+    
+    # Calculate actual periods placed
+    actual_periods = {}
+    for subject in subjects:
+        count = sum(1 for day in DAYS for i in range(9) if tt[day][i] == subject)
+        actual_periods[subject] = count
+    
+    # Verify labs are correctly placed (3 continuous periods)
+    print(f"\n    🔍 Verifying lab placements:")
+    for lab in labs:
+        lab_days = []
+        for day in DAYS:
+            if lab in tt[day]:
+                lab_days.append(day)
+        
+        if lab_days:
+            print(f"      {lab}: placed on {lab_days}")
+            # Check if it's 3 continuous periods
+            for day in lab_days:
+                positions = [i for i in range(9) if tt[day][i] == lab]
+                if len(positions) == 3:
+                    print(f"        ✅ {day}: 3 continuous periods ({positions})")
+                else:
+                    print(f"        ❌ {day}: {len(positions)} periods ({positions})")
+        else:
+            print(f"      {lab}: NOT PLACED")
+    
+    return df, actual_periods
 
-def generate_for_year(subjects, year_label):
-    secs = YEAR_SECTIONS.get(year_label, ["A"])
-    out = {}
-    forbidden = {}
-    base = abs(hash(year_label)) % (10**6)
-
-    for i, sec in enumerate(secs):
-        seed = base + i * 11
-        df, hours, placements, first_assign, last_assign = generate_single(subjects, seed, forbidden)
-        for lab, day, _ in placements:
-            forbidden.setdefault(lab, set()).add(day)
-        out[sec] = (df, hours)
-    return out
-
-def generate_all(year_subjects_map):
-    result = {}
-    for year_label, subjects in year_subjects_map.items():
-        print(f"Generating for {year_label} with subjects: {subjects}")
-        result[year_label] = generate_for_year(subjects, year_label)
-    return result
+def generate_all(year_section_data):
+    """
+    Generate timetables for ALL sections
+    """
+    results = {}
+    
+    if not year_section_data:
+        print("❌ No data to generate!")
+        return results
+    
+    print("\n" + "="*60)
+    print("GENERATING TIMETABLES FOR ALL SECTIONS")
+    print("="*60)
+    
+    for year_label, sections in year_section_data.items():
+        print(f"\n🎯 {year_label.upper()}")
+        
+        year_results = {}
+        
+        for section, subjects in sections.items():
+            if not subjects:
+                print(f"  ⚠️ No subjects for Section {section}")
+                continue
+            
+            seed = abs(hash(f"{year_label}_{section}")) % (10**6)
+            
+            df, periods = generate_single_section(subjects, section, seed)
+            year_results[section] = (df, periods)
+        
+        if year_results:
+            results[year_label] = year_results
+            print(f"\n  ✅ Generated for {len(year_results)} section(s)")
+    
+    return results
 
 # =========================================================
-# 6. MAIN EXECUTION WITH DB FETCH
+# 7. COMPATIBILITY FUNCTIONS
+# =========================================================
+def fetch_subjects_with_hours_from_db(year_string):
+    all_data = fetch_and_prepare_data()
+    
+    # Convert to old format for compatibility
+    result = {}
+    for year_label, sections in all_data.items():
+        if YEAR_MAP_DB.get(year_label) == year_string:
+            for section, subjects in sections.items():
+                result.update(subjects)
+    
+    return result
+
+def fetch_subjects_from_db(year_string):
+    subjects_with_hours = fetch_subjects_with_hours_from_db(year_string)
+    return list(subjects_with_hours.keys())
+
+# =========================================================
+# 8. MAIN EXECUTION
 # =========================================================
 if __name__ == "__main__":
     try:
-        # 1. Prepare input dictionary dynamically from DB
-        db_inputs = {}
+        print("🎯 AI TIMETABLE GENERATOR - ONE LAB PER DAY RULE")
+        print("=" * 60)
         
-        # NOTE: Removed Department filter here as well to match Schema
+        # Fetch data
+        year_section_data = fetch_and_prepare_data()
         
-        for year_label, year_code in YEAR_MAP_DB.items():
-            # Fetch subjects for Year "I", "II", "III", "IV"
-            subjects = fetch_subjects_from_db(year_code)
+        if year_section_data:
+            # Generate for ALL sections
+            timetables = generate_all(year_section_data)
             
-            if subjects:
-                db_inputs[year_label] = subjects
+            # Display ALL results
+            if timetables:
+                print("\n✅ GENERATION COMPLETE FOR ALL SECTIONS!")
+                print("=" * 60)
+                
+                for year_label, sections in timetables.items():
+                    print(f"\n📊 {year_label.upper()}")
+                    print("-" * 40)
+                    
+                    for section, (df, periods) in sections.items():
+                        print(f"\nSection {section}:")
+                        print(df.to_string())
+                        
+                        if periods:
+                            print(f"\nPeriods Summary:")
+                            labs = [s for s in periods.keys() if is_lab(s)]
+                            theory = [s for s in periods.keys() if not is_lab(s)]
+                            
+                            if theory:
+                                print(f"\n  Theory Subjects:")
+                                for subject in theory:
+                                    print(f"    {subject}: {periods[subject]}")
+                            
+                            if labs:
+                                print(f"\n  Lab Subjects:")
+                                for lab in labs:
+                                    print(f"    {lab}: {periods[lab]}")
             else:
-                print(f"No subjects found for {year_label} (Year Code: {year_code}) in DB.")
-        
-        # 2. Generate Timetables
-        if db_inputs:
-            timetables = generate_all(db_inputs)
-
-            # 3. Print/Export logic
-            if "2nd Year" in timetables:
-                print("\n--- 2nd Year Section A Timetable ---")
-                print(timetables["2nd Year"]["A"][0]) 
+                print("\n❌ No timetables generated")
         else:
-            print("No data available to generate timetables. (Did you add allocations in the Admin Dashboard?)")
-
+            print("\n❌ No data available")
+            
     except Exception as e:
-        print(f"Error connecting to DB or generating: {e}") 
+        print(f"\n❌ Error: {e}")
+        import traceback
+        traceback.print_exc()
