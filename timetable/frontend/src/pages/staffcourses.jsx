@@ -3,7 +3,7 @@ import axios from "axios";
 import { motion, AnimatePresence } from "framer-motion";
 import { 
   Trash2, Loader2, CheckCircle, AlertTriangle, ArrowLeft, 
-  BookOpen, Layers, Calendar, Edit2, X, Save, Tag
+  BookOpen, Layers, Calendar, Edit2, X, Save
 } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 
@@ -12,7 +12,6 @@ export default function StaffCourses() {
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState({ type: null, message: "" });
   
-  // --- New State for Editing ---
   const [editingCourse, setEditingCourse] = useState(null); 
   const [isUpdating, setIsUpdating] = useState(false); 
   const [deletingId, setDeletingId] = useState(null);
@@ -34,7 +33,6 @@ export default function StaffCourses() {
     
     try {
       const token = localStorage.getItem("token");
-
       if (!token) {
         handleStatus("error", "Authentication token not found. Please log in.");
         setLoading(false);
@@ -43,15 +41,12 @@ export default function StaffCourses() {
 
       const config = { headers: { Authorization: `Bearer ${token}` } };
 
-      // Fetch both Core Courses and Elective Courses simultaneously
       const [coursesRes, electivesRes] = await Promise.all([
         axios.get("http://localhost:5000/api/courses/", config).catch(() => ({ data: { courses: [] } })),
         axios.get("http://localhost:5000/api/elective-courses/", config).catch(() => ({ data: { electives: [] } }))
       ]);
 
-      // Tag them with a category so we know which API to call later for updates/deletes
       const coreCourses = (coursesRes.data.courses || []).map(c => ({ ...c, category: 'Core' }));
-      // Adjust 'electivesRes.data.electives' if your backend returns a different key
       const electiveCourses = (electivesRes.data.electives || []).map(c => ({ ...c, category: 'Elective' }));
 
       setCourses([...coreCourses, ...electiveCourses]);
@@ -88,8 +83,8 @@ export default function StaffCourses() {
     try {
       const token = localStorage.getItem("token");
       
-      // Determine endpoint based on category
-      const endpoint = course.category === 'Core' ? 'courses' : 'electives';
+      // FIXED: Matches the 'elective-courses' string used in fetch
+      const endpoint = course.category === 'Core' ? 'courses' : 'elective-courses';
 
       await axios.delete(
         `http://localhost:5000/api/${endpoint}/${course._id}`,
@@ -101,7 +96,7 @@ export default function StaffCourses() {
 
     } catch (err) {
       console.error("Delete failed:", err);
-      handleStatus("error", "Failed to delete course.");
+      handleStatus("error", err.response?.data?.message || "Failed to delete course.");
     } finally {
       setDeletingId(null);
     }
@@ -124,8 +119,8 @@ export default function StaffCourses() {
     try {
       const token = localStorage.getItem("token");
       
-      // Determine endpoint based on category
-      const endpoint = editingCourse.category === 'Core' ? 'courses' : 'electives';
+      // FIXED: Matches the 'elective-courses' string used in fetch
+      const endpoint = editingCourse.category === 'Core' ? 'courses' : 'elective-courses';
 
       const res = await axios.put(
         `http://localhost:5000/api/${endpoint}/${editingCourse._id}`,
@@ -133,10 +128,7 @@ export default function StaffCourses() {
         { headers: { Authorization: `Bearer ${token}` } }
       );
 
-      // Determine the correct object key from response
       const updatedData = res.data.course || res.data.elective || editingCourse;
-      
-      // Ensure we keep the category tag
       const finalUpdatedObject = { ...updatedData, category: editingCourse.category };
 
       setCourses(prevCourses => 
@@ -205,12 +197,10 @@ export default function StaffCourses() {
           </div>
         </motion.header>
         
-        {/* ALERTS */}
         <AnimatePresence mode="wait">
           {status.type && <StatusMessage type={status.type} message={status.message} />}
         </AnimatePresence>
 
-        {/* LOADING STATE */}
         {loading && courses.length === 0 && (
           <div className="flex flex-col items-center justify-center py-20 text-indigo-600">
             <Loader2 className="w-10 h-10 animate-spin mb-4" />
@@ -218,7 +208,6 @@ export default function StaffCourses() {
           </div>
         )}
 
-        {/* EMPTY STATE */}
         {!loading && courses.length === 0 && (
           <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-12 text-center">
             <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
@@ -229,10 +218,9 @@ export default function StaffCourses() {
           </div>
         )}
 
-        {/* CONTENT */}
         {!loading && courses.length > 0 && (
           <>
-            {/* MOBILE VIEW: Cards */}
+            {/* MOBILE VIEW */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 lg:hidden">
               {courses.map((course, index) => (
                 <motion.div
@@ -252,14 +240,12 @@ export default function StaffCourses() {
                       <span className="opacity-50">| {course.category}</span>
                     </div>
                     <div className="flex gap-2 -mr-2 -mt-2">
-                        {/* Mobile Edit Button */}
                         <button 
                             onClick={() => initiateEdit(course)}
                             className="text-gray-400 hover:text-blue-600 p-1.5 rounded-full hover:bg-blue-50 transition"
                         >
                             <Edit2 size={18} />
                         </button>
-                        {/* Mobile Delete Button */}
                         <button
                         onClick={() => deleteCourse(course)}
                         disabled={deletingId === course._id}
@@ -287,7 +273,7 @@ export default function StaffCourses() {
               ))}
             </div>
 
-            {/* DESKTOP VIEW: Table */}
+            {/* DESKTOP VIEW */}
             <div className="hidden lg:block bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
               <table className="w-full text-left border-collapse">
                 <thead>
@@ -310,7 +296,6 @@ export default function StaffCourses() {
                       className="hover:bg-gray-50 transition-colors"
                     >
                       <td className="p-4 text-center text-gray-400 font-medium">{index + 1}</td>
-                      
                       <td className="p-4">
                          <span className={`text-xs px-2.5 py-1 rounded-full font-medium border ${
                              course.category === 'Core'
@@ -320,27 +305,19 @@ export default function StaffCourses() {
                              {course.category}
                          </span>
                       </td>
-
                       <td className="p-4">
                         <div className="flex flex-col">
                           <span className="font-semibold text-gray-900 text-base">{course.name}</span>
-                          <span className="text-xs text-gray-500 mt-1">
-                            {course.acronym}
-                          </span>
+                          <span className="text-xs text-gray-500 mt-1">{course.acronym}</span>
                         </div>
                       </td>
-                      
-                      <td className="p-4 font-mono text-sm text-gray-600">
-                        {course.code}
-                      </td>
-                      
+                      <td className="p-4 font-mono text-sm text-gray-600">{course.code}</td>
                       <td className="p-4">
                         <div className="flex items-center gap-2 text-gray-700">
                           <span className="w-2 h-2 rounded-full bg-green-400"></span>
                           Year {course.year}
                         </div>
                       </td>
-                      
                       <td className="p-4 text-center">
                         <div className="flex justify-center gap-2">
                             <button
@@ -373,11 +350,10 @@ export default function StaffCourses() {
         )}
       </div>
 
-      {/* --- EDIT MODAL --- */}
+      {/* EDIT MODAL */}
       <AnimatePresence>
         {editingCourse && (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-                {/* Backdrop */}
                 <motion.div 
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
@@ -386,7 +362,6 @@ export default function StaffCourses() {
                     className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
                 />
                 
-                {/* Modal Content */}
                 <motion.div 
                     initial={{ opacity: 0, scale: 0.95, y: 20 }}
                     animate={{ opacity: 1, scale: 1, y: 0 }}

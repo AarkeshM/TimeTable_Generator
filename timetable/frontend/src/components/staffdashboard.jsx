@@ -103,7 +103,7 @@ export default function StaffDashboard() {
 
   const handleAddRegularCourse = async (e) => {
     e.preventDefault();
-    await submitCourse(regularForm, setRegularForm, `${API_BASE_URL}/courses`, "Core");
+    await submitCourse(regularForm, setRegularForm, `${API_BASE_URL}/courses/add`, "Core");
   };
 
   // --- Handlers for Elective Course ---
