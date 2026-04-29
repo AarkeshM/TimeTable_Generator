@@ -1,251 +1,222 @@
 import React, { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import axios from "axios";
-import { Mail, Lock, User, Phone, Briefcase, UserCheck, GraduationCap, Building, Loader2, ArrowLeft } from "lucide-react";
+import {
+  Mail, Lock, User, Phone, Building, Loader2, ArrowLeft, GraduationCap, 
+  ChevronRight, BookOpen, Clock, Calendar, Layout, Library, Trophy, 
+  Bell, Atom, Calculator, FlaskConical, Globe, Sigma, PenTool, Target, Languages
+} from "lucide-react";
 import { useNavigate, Link } from "react-router-dom";
 
-// --- Animation Variants ---
-const formVariants = {
-  hidden: { opacity: 0, y: 20 },
-  visible: { opacity: 1, y: 0, transition: { duration: 0.4, ease: "easeOut" } },
-  exit: { opacity: 0, y: -20, transition: { duration: 0.3, ease: "easeIn" } }
+// --- Colorful Floating Icons Background ---
+const FloatingBackground = () => {
+  const academicIcons = [
+    { Icon: BookOpen, color: "text-blue-500" },
+    { Icon: Clock, color: "text-amber-500" },
+    { Icon: GraduationCap, color: "text-indigo-600" },
+    { Icon: Atom, color: "text-purple-500" },
+    { Icon: Calculator, color: "text-emerald-500" },
+    { Icon: FlaskConical, color: "text-rose-500" },
+    { Icon: Globe, color: "text-cyan-500" },
+    { Icon: Sigma, color: "text-orange-500" },
+    { Icon: PenTool, color: "text-pink-500" },
+    { Icon: Target, color: "text-red-500" },
+    { Icon: Library, color: "text-blue-600" },
+    { Icon: Languages, color: "text-violet-500" },
+  ];
+
+  // Generating 20 unique floating elements
+  const floatingElements = Array.from({ length: 20 }).map((_, i) => ({
+    id: i,
+    ...academicIcons[i % academicIcons.length],
+    top: `${Math.random() * 100}%`,
+    left: `${Math.random() * 100}%`,
+    size: Math.floor(Math.random() * (32 - 20 + 1) + 20),
+    duration: Math.random() * 10 + 20,
+    delay: Math.random() * 5,
+  }));
+
+  return (
+    <div className="absolute inset-0 overflow-hidden pointer-events-none bg-slate-50/50">
+      {floatingElements.map((item) => (
+        <motion.div
+          key={item.id}
+          // Opacity is set to 40% for better contrast in light theme
+          className={`absolute ${item.color} opacity-40`} 
+          initial={{ y: 0, x: 0, rotate: 0 }}
+          animate={{
+            y: [0, -120, 0],
+            x: [0, 60, 0],
+            rotate: [0, 360],
+          }}
+          transition={{
+            duration: item.duration,
+            repeat: Infinity,
+            delay: item.delay,
+            ease: "linear",
+          }}
+          style={{ top: item.top, left: item.left }}
+        >
+          <item.Icon size={item.size} strokeWidth={2.5} />
+        </motion.div>
+      ))}
+    </div>
+  );
 };
 
-const inputContainerVariants = {
-    hidden: { opacity: 0, x: -20 },
-    visible: { opacity: 1, x: 0 }
-};
-
-// --- Google Icon Component ---
-const GoogleIcon = () => (
-    <svg className="w-5 h-5" viewBox="0 0 48 48">
-        <path fill="#FFC107" d="M43.611,20.083H42V20H24v8h11.303c-1.649,4.657-6.08,8-11.303,8c-6.627,0-12-5.373-12-12s5.373-12,12-12c3.059,0,5.842,1.154,7.961,3.039l5.657-5.657C34.046,6.053,29.268,4,24,4C12.955,4,4,12.955,4,24s8.955,20,20,20s20-8.955,20-20C44,22.659,43.862,21.35,43.611,20.083z"></path>
-        <path fill="#FF3D00" d="M6.306,14.691l6.571,4.819C14.655,15.108,18.961,12,24,12c3.059,0,5.842,1.154,7.961,3.039l5.657-5.657C34.046,6.053,29.268,4,24,4C16.318,4,9.656,8.337,6.306,14.691z"></path>
-        <path fill="#4CAF50" d="M24,44c5.166,0,9.86-1.977,13.409-5.192l-6.19-5.238C29.211,35.091,26.715,36,24,36c-5.222,0-9.619-3.317-11.283-7.946l-6.522,5.025C9.505,39.556,16.227,44,24,44z"></path>
-        <path fill="#1976D2" d="M43.611,20.083H42V20H24v8h11.303c-0.792,2.237-2.231,4.166-4.087,5.574l6.19,5.238C42.022,35.244,44,30.036,44,24C44,22.659,43.862,21.35,43.611,20.083z"></path>
-    </svg>
-);
-
-// --- Auth Page Component ---
 export default function AuthPage() {
   const navigate = useNavigate();
-
   const [isLogin, setIsLogin] = useState(true);
-  const [loginAs, setLoginAs] = useState('staff'); 
+  const [loginAs, setLoginAs] = useState("staff");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
   const [formData, setFormData] = useState({
-    name: "",
-    mobile: "",
-    email: "",
-    department: "",
-    role: "staff", 
-    gender: "",
-    password: "",
-    confirmPassword: "",
+    name: "", mobile: "", email: "", department: "", role: "staff", password: "", confirmPassword: "",
   });
 
-  const handleChange = (e) =>
-    setFormData({ ...formData, [e.target.name]: e.target.value });
-
-  const resetMessages = () => {
-    setError("");
-    setSuccess("");
-  };
+  const handleChange = (e) => setFormData({ ...formData, [e.target.name]: e.target.value });
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setLoading(true);
-    resetMessages();
+    setLoading(true); setError(""); setSuccess("");
 
     if (isLogin) {
       try {
-        // The API endpoint handles both admin and staff login based on credentials
         const { data } = await axios.post("http://localhost:5000/api/login", {
-          email: formData.email,
-          password: formData.password,
-          loginAs: loginAs, // Informing backend of login type
+          email: formData.email, password: formData.password, loginAs,
         });
-
-        setSuccess(data.message);
         localStorage.setItem("token", data.token);
         localStorage.setItem("user", JSON.stringify(data.user));
-
-        setTimeout(() => {
-          if (data.user.role === "admin") {
-            navigate("/admin");
-          } else {
-            navigate("/staff");
-          }
-        }, 1000);
-
-      } catch (err) {
-        setError(err.response?.data?.message || "Login failed. Please check your credentials.");
-        setLoading(false);
-      }
-    } else { // Registration Logic
+        setSuccess("Success! Moving to dashboard...");
+        setTimeout(() => navigate(data.user.role === "admin" ? "/admin" : "/staff"), 1200);
+      } catch (err) { setError("Check your email and password."); }
+      finally { setLoading(false); }
+    } else {
       if (formData.password !== formData.confirmPassword) {
-        setError("Passwords do not match!");
-        setLoading(false);
-        return;
+        setError("Passwords mismatch"); setLoading(false); return;
       }
       try {
-        const { data } = await axios.post("http://localhost:5000/api/register", formData);
-        setSuccess(data.message + " You can now log in.");
-        setTimeout(() => {
-          setIsLogin(true);
-          resetMessages();
-        }, 2000);
-      } catch (err) {
-        setError(err.response?.data?.message || "Registration failed. Please try again.");
-      } finally {
-        setLoading(false);
-      }
+        await axios.post("http://localhost:5000/api/register", formData);
+        setSuccess("Account created! Logging in...");
+        setTimeout(() => setIsLogin(true), 1200);
+      } catch { setError("Registration failed."); }
+      finally { setLoading(false); }
     }
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4 sm:p-6 lg:p-8">
-      <div className="w-full max-w-md">
-         <div className="mb-6">
-            <Link to="/" className="inline-flex items-center gap-2 text-sm text-gray-600 hover:text-blue-600 transition-colors">
-                <ArrowLeft className="w-4 h-4" />
-                Back to Home
-            </Link>
-         </div>
+    <div className="relative min-h-screen flex items-center justify-center px-4 py-8 overflow-hidden bg-white">
+      
+      {/* Background with multiple colored icons */}
+      <FloatingBackground />
 
+      {/* Subtle Dot Mesh */}
+      <div className="absolute inset-0 opacity-[0.1] pointer-events-none" 
+           style={{ backgroundImage: `radial-gradient(#475569 1px, transparent 1px)`, backgroundSize: '30px 30px' }}>
+      </div>
+
+      <div className="relative z-10 w-full max-w-[440px]">
+        
+        {/* Back Link */}
+        <div className="mb-6">
+          <Link to="/" className="text-slate-500 hover:text-blue-600 flex items-center gap-2 transition-all w-fit group font-bold text-sm">
+            <ArrowLeft size={18} className="group-hover:-translate-x-1 transition-transform" /> 
+            Back to Home
+          </Link>
+        </div>
+
+        {/* Brand Header */}
         <div className="text-center mb-8">
-            <a href="/" className="inline-flex items-center gap-3 text-3xl font-bold text-gray-900 tracking-tight">
-                <GraduationCap className="w-9 h-9 text-blue-600" />
-                AcademicSheduler
-            </a>
-            <p className="mt-2 text-gray-500">AI-Powered Timetable Generation</p>
+          <motion.div 
+            initial={{ y: -20, opacity: 0 }} animate={{ y: 0, opacity: 1 }}
+            className="inline-flex items-center justify-center p-4 bg-white border-2 border-slate-50 rounded-3xl shadow-xl shadow-slate-200 mb-4"
+          >
+            <GraduationCap size={40} className="text-blue-600" />
+          </motion.div>
+          <h1 className="text-3xl font-black text-slate-900 tracking-tight">
+            Academic<span className="text-blue-600">Scheduler</span>
+          </h1>
+          <p className="text-slate-500 text-sm font-bold mt-1">Smart Campus Planning AI</p>
         </div>
 
-        <div className="bg-white p-8 rounded-2xl shadow-lg border border-gray-200">
+        {/* Modern Glassy Card */}
+        <motion.div 
+          initial={{ y: 30, opacity: 0 }} animate={{ y: 0, opacity: 1 }}
+          className="bg-white/80 backdrop-blur-xl p-6 sm:p-10 rounded-[2.5rem] shadow-[0_20px_60px_-15px_rgba(0,0,0,0.1)] border border-white"
+        >
+          {/* Staff/Admin Toggle */}
+          {isLogin && (
+            <div className="relative flex bg-slate-100 p-1.5 rounded-2xl mb-8">
+              <motion.div 
+                animate={{ x: loginAs === "staff" ? "0%" : "100%" }}
+                className="absolute h-[calc(100%-12px)] w-[calc(50%-6px)] bg-white rounded-xl shadow-sm"
+              />
+              <button onClick={() => setLoginAs("staff")}
+                className={`relative z-10 w-1/2 py-2.5 text-sm font-black transition-colors ${loginAs === "staff" ? "text-blue-600" : "text-slate-500"}`}>
+                Staff
+              </button>
+              <button onClick={() => setLoginAs("admin")}
+                className={`relative z-10 w-1/2 py-2.5 text-sm font-black transition-colors ${loginAs === "admin" ? "text-blue-600" : "text-slate-500"}`}>
+                Admin
+              </button>
+            </div>
+          )}
+
           <AnimatePresence mode="wait">
-            {isLogin ? (
-              <motion.div key="login" variants={formVariants} initial="hidden" animate="visible" exit="exit">
-                <div className="mb-6">
-                  <div className="flex bg-gray-100 rounded-lg p-1">
-                      <button 
-                          onClick={() => setLoginAs('staff')}
-                          className={`w-1/2 py-2 text-sm font-semibold rounded-md transition-colors ${loginAs === 'staff' ? 'bg-white text-blue-600 shadow' : 'text-gray-600 hover:bg-gray-200'}`}
-                      >
-                          Staff Login
-                      </button>
-                      <button 
-                          onClick={() => setLoginAs('admin')}
-                          className={`w-1/2 py-2 text-sm font-semibold rounded-md transition-colors ${loginAs === 'admin' ? 'bg-white text-blue-600 shadow' : 'text-gray-600 hover:bg-gray-200'}`}
-                      >
-                          Admin Login
-                      </button>
-                  </div>
+            <motion.form 
+              key={isLogin ? "L" : "R"}
+              initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }}
+              onSubmit={handleSubmit} className="space-y-4"
+            >
+              {!isLogin && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <Input icon={User} name="name" placeholder="Full Name" onChange={handleChange} required />
+                  <Input icon={Phone} name="mobile" placeholder="Mobile" onChange={handleChange} required />
                 </div>
-                
-                <h2 className="text-2xl font-bold text-gray-800 mb-1">Welcome Back!</h2>
-                <p className="text-gray-500 mb-6 text-sm">Please enter your details to sign in.</p>
+              )}
+              <Input icon={Mail} name="email" type="email" placeholder="Email Address" onChange={handleChange} required />
+              {!isLogin && <Input icon={Building} name="department" placeholder="Department" onChange={handleChange} required />}
+              <Input icon={Lock} name="password" type="password" placeholder="Password" onChange={handleChange} required />
+              {!isLogin && <Input icon={Lock} name="confirmPassword" type="password" placeholder="Confirm" onChange={handleChange} required />}
 
-                <form onSubmit={handleSubmit} className="space-y-4">
-                  <InputWithIcon Icon={Mail} type="email" name="email" value={formData.email} onChange={handleChange} placeholder="Email address" required />
-                  <InputWithIcon Icon={Lock} type="password" name="password" value={formData.password} onChange={handleChange} placeholder="Password" required />
-                  
-                  <div className="flex justify-end text-sm">
-                    <a href="#" className="font-medium text-blue-600 hover:underline">Forgot password?</a>
-                  </div>
-
-                  <SubmitButton loading={loading} text="Sign In" />
-                </form>
-
-                <div className="my-6 flex items-center">
-                    <div className="flex-grow border-t border-gray-200"></div>
-                    <span className="mx-4 text-xs font-semibold text-gray-400">OR</span>
-                    <div className="flex-grow border-t border-gray-200"></div>
-                </div>
-
-                <button
-                    type="button"
-                    className="w-full flex justify-center items-center gap-3 py-2.5 px-4 bg-white text-gray-700 font-semibold rounded-lg border border-gray-300 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition"
-                    onClick={() => console.log("Continue with Google clicked")}
-                >
-                    <GoogleIcon />
-                    Continue with Google
-                </button>
-
-              </motion.div>
-            ) : (
-              <motion.div key="register" variants={formVariants} initial="hidden" animate="visible" exit="exit">
-                <h2 className="text-2xl font-bold text-gray-800 mb-1">Create Your Account</h2>
-                <p className="text-gray-500 mb-6 text-sm">Join our platform to automate scheduling.</p>
-
-                <form onSubmit={handleSubmit} className="space-y-4">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      <InputWithIcon Icon={User} type="text" name="name" value={formData.name} onChange={handleChange} placeholder="Full Name" required />
-                      <InputWithIcon Icon={Phone} type="tel" name="mobile" value={formData.mobile} onChange={handleChange} placeholder="Mobile No." required />
-                  </div>
-                  <InputWithIcon Icon={Building} type="text" name="department" value={formData.department} onChange={handleChange} placeholder="Department" required />
-                  <div className="grid grid-cols-2 gap-4">
-                    <SelectInput Icon={UserCheck} name="role" value={formData.role} onChange={handleChange} options={[{value: 'staff', label: 'Staff'}, {value: 'admin', label: 'Admin'}]} required />
-                    <SelectInput Icon={UserCheck} name="gender" value={formData.gender} onChange={handleChange} options={[{value: '', label: 'Gender'},{value: 'male', label: 'Male'}, {value: 'female', label: 'Female'}, {value: 'other', label: 'Other'}]} required />
-                  </div>
-                  <InputWithIcon Icon={Mail} type="email" name="email" value={formData.email} onChange={handleChange} placeholder="Email address" required />
-                  <InputWithIcon Icon={Lock} type="password" name="password" value={formData.password} onChange={handleChange} placeholder="Create Password" required />
-                  <InputWithIcon Icon={Lock} type="password" name="confirmPassword" value={formData.confirmPassword} onChange={handleChange} placeholder="Confirm Password" required />
-
-                  <SubmitButton loading={loading} text="Create Account" />
-                </form>
-              </motion.div>
-            )}
-          </AnimatePresence>
-          
-          {/* --- MESSAGES --- */}
-          <AnimatePresence>
-          {error && <p className="mt-4 text-xs text-center text-red-600 bg-red-50 p-2 rounded-md">{error}</p>}
-          {success && <p className="mt-4 text-xs text-center text-green-600 bg-green-50 p-2 rounded-md">{success}</p>}
+              <button disabled={loading}
+                className="w-full bg-blue-600 hover:bg-blue-700 py-4 rounded-2xl text-white font-black shadow-lg shadow-blue-100 flex items-center justify-center gap-2 transition-all active:scale-[0.98] disabled:opacity-70 mt-4">
+                {loading ? <Loader2 className="animate-spin" /> : <>{isLogin ? "Sign In" : "Create Account"} <ChevronRight size={18} /></>}
+              </button>
+            </motion.form>
           </AnimatePresence>
 
+          {/* Feedback */}
+          <div className="h-4 mt-4 text-center">
+            {error && <p className="text-red-500 text-xs font-bold">{error}</p>}
+            {success && <p className="text-green-600 text-xs font-bold">{success}</p>}
+          </div>
 
-          <p className="text-center text-sm text-gray-500 mt-6">
-            {isLogin ? "Don’t have an account?" : "Already have an account?"}{" "}
-            <button onClick={() => { setIsLogin(!isLogin); resetMessages(); }} className="font-semibold text-blue-600 hover:underline focus:outline-none">
-              {isLogin ? "Sign up" : "Sign in"}
-            </button>
-          </p>
-        </div>
+          <div className="mt-8 text-center border-t border-slate-100 pt-6">
+            <p className="text-slate-500 text-sm font-bold">
+              {isLogin ? "New here?" : "Already a member?"}
+              <button onClick={() => { setIsLogin(!isLogin); setError(""); setSuccess(""); }} 
+                className="text-blue-600 hover:text-blue-800 font-black ml-2 underline underline-offset-4">
+                {isLogin ? "Register" : "Login"}
+              </button>
+            </p>
+          </div>
+        </motion.div>
       </div>
     </div>
   );
 }
 
-// --- Reusable Input Components ---
-const InputWithIcon = ({ Icon, ...props }) => (
-    <motion.div variants={inputContainerVariants} className="relative">
-        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-            <Icon className="w-5 h-5 text-gray-400" />
-        </div>
-        <input {...props} className="w-full pl-10 pr-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition sm:text-sm" />
-    </motion.div>
-);
-
-const SelectInput = ({ Icon, name, value, onChange, options, required }) => (
-    <motion.div variants={inputContainerVariants} className="relative">
-        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-            <Icon className="w-5 h-5 text-gray-400" />
-        </div>
-        <select name={name} value={value} onChange={onChange} required={required} className="w-full pl-10 pr-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition sm:text-sm appearance-none bg-white">
-            {options.map(opt => <option key={opt.value} value={opt.value} disabled={opt.value === ""}>{opt.label}</option>)}
-        </select>
-    </motion.div>
-);
-
-const SubmitButton = ({ loading, text }) => (
-    <button
-      type="submit"
-      disabled={loading}
-      className="w-full flex justify-center items-center py-3 px-4 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition disabled:bg-blue-400"
-    >
-      {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : text}
-    </button>
+// Reusable Input
+const Input = ({ icon: Icon, ...props }) => (
+  <div className="relative group">
+    <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-500 transition-colors">
+      <Icon size={18} strokeWidth={2.5} />
+    </div>
+    <input {...props}
+      className="w-full pl-12 pr-4 py-3.5 bg-slate-50/50 border-2 border-slate-100 text-slate-800 rounded-2xl outline-none focus:ring-4 focus:ring-blue-50 focus:border-blue-400 transition-all placeholder:text-slate-400 text-sm font-bold"
+    />
+  </div>
 );

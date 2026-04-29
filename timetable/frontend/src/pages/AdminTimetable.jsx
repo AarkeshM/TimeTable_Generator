@@ -2,8 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import {
-    ArrowLeft, Save, Edit2, ChevronDown, History,
-    FileSpreadsheet, Trash2, BookOpen, User, Calendar, Check, Zap, FileText, Clock
+    ArrowLeft, FileSpreadsheet, BookOpen, User, Calendar, FileText, Clock
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { jsPDF } from "jspdf";
@@ -14,7 +13,6 @@ export default function TimetableDisplay() {
     const location = useLocation();
 
     // --- STATE ---
-    const [historyList, setHistoryList] = useState([]);
     const [currentData, setCurrentData] = useState(null);
     const [selectedHistoryId, setSelectedHistoryId] = useState("new");
     const [currentVersionDate, setCurrentVersionDate] = useState("Syncing...");
@@ -23,10 +21,8 @@ export default function TimetableDisplay() {
     const [selectedSection, setSelectedSection] = useState("");
     const [isEditing, setIsEditing] = useState(false);
     const [loading, setLoading] = useState(false);
-    const [showHistoryMenu, setShowHistoryMenu] = useState(false);
 
     useEffect(() => {
-        fetchHistoryList();
         fetchCourseAndUserData(); 
         if (location.state?.timetableData) {
             loadTimetableData(location.state.timetableData, "new", new Date().toISOString());
@@ -40,7 +36,6 @@ export default function TimetableDisplay() {
     const cleanCellContent = (raw) => {
         if (!raw) return "";
         let str = String(raw);
-        // Identify lunch based on content or your vertical-text HTML tags
         if (str.toUpperCase().includes('LUNCH') || str.includes('vertical-text')) return "LUNCH";
         return str.replace(/<[^>]*>?/gm, '').replace(/&nbsp;/g, ' ').trim();
     };
@@ -48,48 +43,54 @@ export default function TimetableDisplay() {
     const formatDate = (iso) => {
         if (!iso || iso === "Loading..." || iso === "Syncing...") return "Draft Version";
         const date = new Date(iso);
-        // Direct fix for the "Invalid Date" UI issue
         if (isNaN(date.getTime())) return "Recently Generated"; 
         return date.toLocaleDateString('en-US', { 
             month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true 
         });
     };
 
-    // --- API CALLS ---
+    // --- INTEGRATED API CALLS ---
     const fetchCourseAndUserData = async () => {
         try {
             const token = localStorage.getItem("token");
             const headers = { Authorization: `Bearer ${token}` };
+
+            // Fetching from your defined routes
             const [cRes, sRes] = await Promise.all([
-                axios.get("http://localhost:5000/api/courses", { headers }).catch(() => ({data:{}})),
-                axios.get("http://localhost:5000/api/staff", { headers }).catch(() => ({data:[]}))
+                axios.get("http://localhost:5000/api/courses", { headers }).catch(() => ({ data: { courses: [] } })),
+                axios.get("http://localhost:5000/api/staff", { headers }).catch(() => ({ data: [] }))
             ]);
 
+            // Create Staff Lookup Map
             const userMap = {};
             const staffList = sRes.data.users || sRes.data || [];
             staffList.forEach(u => { if (u._id) userMap[u._id] = u.name; });
 
+            // Create Course Detail Map (Mapping by Name and Acronym)
             const map = {};
-            const courseList = cRes.data.courses || [];
+            const courseList = cRes.data.courses || cRes.data || [];
+            
             courseList.forEach(c => {
-                const key = c.name.toLowerCase().trim();
-                map[key] = {
+                const facultyName = (c.staffId && typeof c.staffId === 'object') 
+                    ? c.staffId.name 
+                    : (userMap[c.staffId] || "Unassigned");
+
+                const details = {
                     name: c.name,
-                    acronym: c.acronym || c.name.substring(0,3).toUpperCase(),
                     code: c.code || "N/A",
-                    faculty: typeof c.staffId === 'object' ? c.staffId.name : (userMap[c.staffId] || "Unassigned")
+                    acronym: c.acronym || c.name.substring(0, 3).toUpperCase(),
+                    faculty: facultyName
                 };
+
+                map[c.name.toLowerCase().trim()] = details;
+                if (c.acronym) {
+                    map[c.acronym.toLowerCase().trim()] = details;
+                }
             });
             setCourseDetailsMap(map);
-        } catch (err) { console.error("Sync error", err); }
-    };
-
-    const fetchHistoryList = async () => {
-        try {
-            const token = localStorage.getItem("token");
-            const res = await axios.get("http://localhost:5000/api/timetable/history", { headers: { Authorization: `Bearer ${token}` } });
-            if (res.data.success) setHistoryList(res.data.data.sort((a,b) => new Date(b.createdAt) - new Date(a.createdAt)));
-        } catch (err) {}
+        } catch (err) {
+            console.error("Sync error", err);
+        }
     };
 
     const fetchSingleTimetable = async (id = null) => {
@@ -104,7 +105,7 @@ export default function TimetableDisplay() {
         } catch (err) {
             const MOCK = { "I": { "A": { "columns": ["Day", "09:00", "10:00", "11:00"], "data": [["MON", "MATH", "PHY", "LUNCH"]] } } };
             loadTimetableData(MOCK, "mock", new Date().toISOString());
-        } finally { setLoading(false); setShowHistoryMenu(false); }
+        } finally { setLoading(false); }
     };
 
     const loadTimetableData = (data, id, dateStr) => {
@@ -126,75 +127,54 @@ export default function TimetableDisplay() {
             const res = await axios.post("http://localhost:5000/api/timetable", { timetable: currentData }, { headers: { Authorization: `Bearer ${token}` } });
             if (res.data.success) {
                 setIsEditing(false);
-                fetchHistoryList();
                 setCurrentVersionDate(formatDate(new Date().toISOString()));
                 alert("Institutional Timetable Secured!");
             }
         } catch (err) { alert("Save failed"); } finally { setLoading(false); }
     };
 
-    // --- EXPORT LOGIC ---
+    // --- EXPORT ---
     const downloadExcel = () => {
-        const wb = XLSX.utils.book_new();
         const s = currentData[selectedYear][selectedSection];
         const ws = XLSX.utils.aoa_to_sheet([s.columns, ...s.data]);
-        XLSX.utils.book_append_sheet(wb, ws, `Y${selectedYear}-S${selectedSection}`);
-        XLSX.writeFile(wb, `AcadAI_Timetable_${selectedYear}_${selectedSection}.xlsx`);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Timetable");
+        XLSX.writeFile(wb, `Timetable_${selectedYear}_${selectedSection}.xlsx`);
     };
 
     const downloadPDF = () => {
-        const choice = window.confirm("Download Full Institutional Timetable? \n(Click 'Cancel' for current Section only)");
         const doc = new jsPDF('l', 'mm', 'a4');
-        
-        const addSectionToPDF = (year, section, startY) => {
-            const s = currentData[year][section];
-            doc.setFontSize(14);
-            doc.text(`Year ${year} | Section ${section}`, 14, startY - 5);
-            autoTable(doc, {
-                startY: startY,
-                head: [s.columns],
-                body: s.data.map(row => row.map(cell => cleanCellContent(cell))),
-                theme: 'grid',
-                styles: { fontSize: 7, halign: 'center' },
-                headStyles: { fillColor: [79, 70, 229] },
-                didParseCell: (data) => {
-                    if (data.cell.text[0] === 'LUNCH') {
-                        data.cell.styles.fillColor = [255, 251, 235];
-                        data.cell.styles.textColor = [180, 83, 9];
-                    }
-                }
-            });
-            return doc.lastAutoTable.finalY + 15;
-        };
-
-        if (choice) {
-            let yPos = 20;
-            Object.keys(currentData).forEach(year => {
-                Object.keys(currentData[year]).forEach(section => {
-                    if (yPos > 160) { doc.addPage(); yPos = 20; }
-                    yPos = addSectionToPDF(year, section, yPos);
-                });
-            });
-            doc.save("Full_Institutional_Timetable.pdf");
-        } else {
-            addSectionToPDF(selectedYear, selectedSection, 20);
-            doc.save(`Timetable_Y${selectedYear}_${selectedSection}.pdf`);
-        }
+        const s = currentData[selectedYear][selectedSection];
+        doc.text(`Year ${selectedYear} - Section ${selectedSection}`, 14, 15);
+        autoTable(doc, {
+            startY: 20,
+            head: [s.columns],
+            body: s.data.map(row => row.map(cell => cleanCellContent(cell))),
+            theme: 'grid'
+        });
+        doc.save("Timetable.pdf");
     };
 
+    // --- UPDATED WORKLOAD LOGIC ---
     const allocationSummary = useMemo(() => {
         if (!currentData || !selectedYear || !selectedSection) return [];
         const sheet = currentData[selectedYear]?.[selectedSection];
         if (!sheet?.data) return [];
+        
         const stats = {};
         sheet.data.forEach(row => {
             row.slice(1).forEach(cell => {
-                const name = cleanCellContent(cell);
-                if (name && name !== "-" && name !== "LUNCH") {
-                    const key = name.toLowerCase();
+                const rawName = cleanCellContent(cell);
+                if (rawName && rawName !== "-" && rawName !== "LUNCH") {
+                    const key = rawName.toLowerCase().trim();
                     if (!stats[key]) {
                         const d = courseDetailsMap[key];
-                        stats[key] = { name: d?.name || name, code: d?.code || "N/A", acronym: d?.acronym || name, faculty: d?.faculty || "External", count: 0 };
+                        stats[key] = { 
+                            name: d?.name || rawName, 
+                            code: d?.code || "N/A", 
+                            faculty: d?.faculty || "Unassigned", 
+                            count: 0 
+                        };
                     }
                     stats[key].count++;
                 }
@@ -220,18 +200,15 @@ export default function TimetableDisplay() {
                             <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Timetable Manager</p>
                         </div>
                     </div>
-
                     <div className="flex items-center gap-3">
                         <div className="hidden md:flex items-center gap-2 px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl">
                             <Clock size={14} className="text-indigo-500" />
-                            <span className="text-[10px] font-black uppercase text-slate-600 tracking-wider">
-                                {currentVersionDate}
-                            </span>
+                            <span className="text-[10px] font-black uppercase text-slate-600 tracking-wider">{currentVersionDate}</span>
                         </div>
-                        <button onClick={() => setIsEditing(!isEditing)} className={`px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${isEditing ? 'bg-indigo-600 text-white shadow-xl shadow-indigo-100' : 'bg-white text-slate-600 border border-slate-200'}`}>
+                        <button onClick={() => setIsEditing(!isEditing)} className={`px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${isEditing ? 'bg-indigo-600 text-white' : 'bg-white text-slate-600 border border-slate-200'}`}>
                             {isEditing ? 'Finish Edit' : 'Modify Slots'}
                         </button>
-                        <button onClick={handleSave} disabled={loading} className="px-6 py-2.5 bg-slate-900 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-blue-600 disabled:opacity-50 transition-all">
+                        <button onClick={handleSave} disabled={loading} className="px-6 py-2.5 bg-slate-900 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-blue-600 transition-all">
                             {loading ? 'Saving...' : 'Save Changes'}
                         </button>
                     </div>
@@ -247,7 +224,7 @@ export default function TimetableDisplay() {
                     </div>
                     <div className="flex gap-3">
                         {currentData[selectedYear] && Object.keys(currentData[selectedYear]).map(s => (
-                            <button key={s} onClick={() => setSelectedSection(s)} className={`w-11 h-11 rounded-xl flex items-center justify-center text-xs font-black border transition-all ${selectedSection === s ? 'bg-indigo-600 text-white border-indigo-600 shadow-lg shadow-indigo-100' : 'bg-white text-slate-400 border-slate-200 hover:border-slate-400'}`}>{s}</button>
+                            <button key={s} onClick={() => setSelectedSection(s)} className={`w-11 h-11 rounded-xl flex items-center justify-center text-xs font-black border transition-all ${selectedSection === s ? 'bg-indigo-600 text-white shadow-lg' : 'bg-white text-slate-400 border-slate-200'}`}>{s}</button>
                         ))}
                     </div>
                     <div className="flex gap-2">
@@ -280,7 +257,7 @@ export default function TimetableDisplay() {
                                             return (
                                                 <td key={cIdx} className={`p-0 min-w-[150px] ${cIdx === 0 ? 'sticky left-0 bg-white z-10 border-r border-slate-100 font-black text-[11px] text-slate-900 uppercase italic' : ''}`}>
                                                     {cIdx === 0 ? (
-                                                        <div className="flex items-center justify-center gap-2 tracking-tighter py-6"><Calendar size={12} className="text-indigo-500" />{cell}</div>
+                                                        <div className="flex items-center justify-center gap-2 py-6"><Calendar size={12} className="text-indigo-500" />{cell}</div>
                                                     ) : name === "LUNCH" ? (
                                                         <div className="flex flex-col items-center justify-center py-4 text-[10px] font-black text-amber-600 bg-amber-50/30 h-full leading-none tracking-widest">
                                                             <span>L</span><span className="mt-1">U</span><span className="mt-1">N</span><span className="mt-1">C</span><span className="mt-1">H</span>
@@ -319,12 +296,13 @@ export default function TimetableDisplay() {
                 </div>
             </div>
 
+            {/* --- FACULTY WORKLOAD TABLE --- */}
             <div className="max-w-7xl mx-auto px-4 mt-8">
                 <div className="bg-white rounded-[2.5rem] border border-slate-200 overflow-hidden shadow-sm">
                     <div className="px-8 py-6 border-b border-slate-100 bg-slate-50/30 flex items-center justify-between">
                         <div className="flex items-center gap-3">
                             <div className="p-2 bg-indigo-600 rounded-xl text-white shadow-lg shadow-indigo-100"><BookOpen size={18} /></div>
-                            <h2 className="text-sm font-black tracking-tight uppercase">Faculty Workload</h2>
+                            <h2 className="text-sm font-black tracking-tight uppercase">Faculty Workload Summary</h2>
                         </div>
                     </div>
                     <div className="overflow-x-auto">
@@ -332,7 +310,7 @@ export default function TimetableDisplay() {
                             <thead className="bg-slate-50/50 text-[10px] font-black text-slate-400 uppercase tracking-[0.15em]">
                                 <tr>
                                     <th className="px-8 py-5">Code</th>
-                                    <th className="px-8 py-5">Subject</th>
+                                    <th className="px-8 py-5">Course Name</th>
                                     <th className="px-8 py-5">Faculty</th>
                                     <th className="px-8 py-5 text-center">Periods</th>
                                 </tr>

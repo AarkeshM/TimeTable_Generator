@@ -10,4 +10,4 @@ router.get("/", protect, getAllocations);
 router.delete("/:id", protect, deleteAllocation);
 router.put("/:id", protect, updateAllocation);
 
-export default router;   
+export default router;
